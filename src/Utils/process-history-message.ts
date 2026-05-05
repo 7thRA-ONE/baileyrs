@@ -70,15 +70,21 @@ export const processHistoryMessage = (item: proto.IHistorySync): ProcessedHistor
 				// definition treats them as compatible — the runtime shape
 				// matches.
 				const chat = conversation as Chat
+				const chatId = chat.id
+				if (!chatId) {
+					// Server bug or malformed history blob — skip rather than
+					// propagate undefined ids that downstream consumers
+					// dereference unconditionally.
+					continue
+				}
 				contacts.push({
-					id: chat.id!,
+					id: chatId,
 					name: chat.displayName || chat.name || chat.username || undefined,
 					username: chat.username || undefined,
 					lid: chat.lidJid || chat.accountLid || undefined,
 					phoneNumber: chat.pnJid || undefined
 				})
 
-				const chatId = chat.id!
 				const isLid = isLidUser(chatId) || isHostedLidUser(chatId)
 				const isPn = isPnUser(chatId) || isHostedPnUser(chatId)
 				if (isLid && chat.pnJid) {
@@ -105,7 +111,12 @@ export const processHistoryMessage = (item: proto.IHistorySync): ProcessedHistor
 					messages.push(message)
 
 					if (!chat.messages?.length) {
-						chat.messages = [{ message }]
+						// `chat.messages` is typed as `proto.IHistorySyncMsg[]`
+						// but we want to store the WAMessage we already
+						// extracted. The runtime shape `{ message }` matches
+						// IHistorySyncMsg's optional `message` slot — cast is
+						// intentional and isolated to this preview-only field.
+						chat.messages = [{ message } as never]
 					}
 
 					if (!message.key?.fromMe && !chat.lastMessageRecvTimestamp) {
@@ -113,16 +124,21 @@ export const processHistoryMessage = (item: proto.IHistorySync): ProcessedHistor
 					}
 
 					// Extract verifiedName side-channel when WhatsApp sent a
-					// privacy-mode stub for the participant.
+					// privacy-mode stub for the participant. Skip when the
+					// stub carries no addressable target (defensive — server
+					// always populates one of the two slots in practice).
 					if (
 						(message.messageStubType === STUB.BIZ_PRIVACY_MODE_TO_BSP ||
 							message.messageStubType === STUB.BIZ_PRIVACY_MODE_TO_FB) &&
 						message.messageStubParameters?.[0]
 					) {
-						contacts.push({
-							id: message.key.participant || message.key.remoteJid!,
-							verifiedName: message.messageStubParameters[0]
-						})
+						const verifiedNameId = message.key?.participant ?? message.key?.remoteJid
+						if (verifiedNameId) {
+							contacts.push({
+								id: verifiedNameId,
+								verifiedName: message.messageStubParameters[0]
+							})
+						}
 					}
 				}
 
