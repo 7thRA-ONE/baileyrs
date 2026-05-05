@@ -311,7 +311,10 @@ const ADAPTERS = {
 		const messages = rawMessages
 			.map(m => {
 				if (!isObject(m)) return null
-				const serverId = asNumber(m.server_id)?.toString() ?? asString(m.server_id)
+				// Prefer the original string form — `server_id` is 64-bit and
+				// `Number()` rounds at 2^53, so going through `asNumber` first
+				// would silently corrupt newsletter ids past that boundary.
+				const serverId = asString(m.server_id) ?? asNumber(m.server_id)?.toString()
 				if (!serverId) return null
 				const rawReactions = Array.isArray(m.reactions) ? m.reactions : []
 				const reactions = rawReactions
