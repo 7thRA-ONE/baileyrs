@@ -260,6 +260,22 @@ const DISPATCHERS: DispatcherMap = {
 		// `:474-490` (MESSAGE_EDIT). Both surface as `messages.update` with
 		// the TARGET key (id taken from protocolMessage.key).
 		const protocolMsg = evt.messageProto.protocolMessage
+		// `group.member-tag.update` doesn't reuse `protocolMsg.key.id` — the
+		// label change applies to the participant directly, identified by
+		// the envelope key. Mirror upstream `process-message.ts:492-503`.
+		if (
+			protocolMsg?.type === WAProto.Message.ProtocolMessage.Type.GROUP_MEMBER_LABEL_CHANGE &&
+			protocolMsg.memberLabel?.label
+		) {
+			ctx.ev.emit('group.member-tag.update', {
+				groupId: evt.chatJid,
+				label: protocolMsg.memberLabel.label,
+				participant: evt.senderJid ?? '',
+				participantAlt: evt.participantAlt,
+				messageTimestamp: evt.timestamp
+			})
+		}
+
 		const protocolKeyId = protocolMsg?.key?.id
 		if (protocolMsg && protocolKeyId) {
 			if (protocolMsg.type === WAProto.Message.ProtocolMessage.Type.REVOKE) {
