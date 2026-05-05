@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
 	createWhatsAppClient,
@@ -265,7 +266,12 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 	const { ws, isRawNodeEnabled } = makeWsEmitter(() => client)
 
 	let tagEpoch = 0
-	const tagPrefix = `${Date.now().toString(36)}.`
+	// Per-socket random prefix avoids collisions between sockets created
+	// in the same millisecond. Date.now()-based prefixes (the previous
+	// implementation) collided in test loops and worker pools — every
+	// socket started at `tagEpoch=0` and a tagged message-id collision
+	// breaks waitForMessage routing.
+	const tagPrefix = `${randomBytes(6).toString('base64url')}.`
 	const generateMessageTag = () => `${tagPrefix}${tagEpoch++}`
 
 	let pairedAccount: { platform?: string; businessName?: string } | undefined
