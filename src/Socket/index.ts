@@ -491,8 +491,21 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 		logger,
 		ws,
 		type: 'md' as const,
-		get user() {
-			return user
+		// Upstream `socket.ts:1106-1108` returns `authState.creds.me`, which
+		// carries `{ id, lid, name, verifiedName, ... }` — full Contact
+		// shape. Returning the bare `{id, lid}` like before broke
+		// upstream-port code that read `sock.user.name` /
+		// `sock.user.verifiedName`. Build the same structure on the fly
+		// from the merged auth.creds + paired-account state.
+		get user(): Contact | undefined {
+			if (!user) return undefined
+			return {
+				id: user.id ?? '',
+				lid: user.lid,
+				name: pairedAccount?.businessName ?? auth.creds?.me?.name,
+				verifiedName: auth.creds?.me?.verifiedName,
+				...(auth.creds?.me?.phoneNumber ? { phoneNumber: auth.creds.me.phoneNumber } : {})
+			}
 		},
 		get waClient() {
 			return client
