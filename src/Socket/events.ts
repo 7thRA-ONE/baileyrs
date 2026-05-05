@@ -278,7 +278,10 @@ export const makeEventHandler = (
 				return
 
 			case 'markChatAsReadUpdate':
-				ev.emit('chats.update', [{ id: evt.jid, unreadCount: 0 }])
+				// Mirrors upstream `chat-utils.ts:852`: read=true → unreadCount=0,
+				// read=false (mark as unread) → -1 sentinel that consumers
+				// interpret as "at least one unread, count unknown".
+				ev.emit('chats.update', [{ id: evt.jid, unreadCount: evt.read ? 0 : -1 }])
 				return
 
 			// ── Calls ──

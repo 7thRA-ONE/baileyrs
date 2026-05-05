@@ -234,6 +234,8 @@ export interface CanonicalStarUpdate {
 export interface CanonicalMarkChatAsReadUpdate {
 	type: 'markChatAsReadUpdate'
 	jid: string
+	/** `false` when the user marked the chat as unread. */
+	read: boolean
 }
 
 // ── Calls ──

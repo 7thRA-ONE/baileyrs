@@ -270,7 +270,12 @@ export const adaptBridgeEvent = (event: WhatsAppEvent, logger?: ILogger): Canoni
 		case 'mark_chat_as_read_update': {
 			if (!isObject(data)) return null
 			const jid = asJidString(data.jid)
-			return jid ? { type: 'markChatAsReadUpdate', jid } : null
+			if (!jid) return null
+			const action = isObject(data.action) ? data.action : undefined
+			// Default true for legacy bridge payloads; today the bridge
+			// surfaces MarkChatAsReadAction.read for both directions.
+			const read = asBoolOr(action?.read, true)
+			return { type: 'markChatAsReadUpdate', jid, read }
 		}
 
 		// ── Calls ──
