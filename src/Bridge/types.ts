@@ -201,6 +201,8 @@ export interface CanonicalPinUpdate {
 	type: 'pinUpdate'
 	jid: string
 	timestamp?: number
+	/** `false` when the user unpinned. Drives `chats.update.pinned: undefined`. */
+	pinned: boolean
 }
 
 export interface CanonicalMuteUpdate {

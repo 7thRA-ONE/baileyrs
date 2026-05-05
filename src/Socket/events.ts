@@ -242,7 +242,12 @@ export const makeEventHandler = (
 				return
 
 			case 'pinUpdate':
-				ev.emit('chats.update', [{ id: evt.jid, pinned: evt.timestamp }])
+				// Upstream Baileys uses `Chat.pinned` as `number | undefined` —
+				// undefined is the canonical "not pinned" value. Emit the
+				// timestamp on pin and `undefined` on unpin so consumers
+				// reading `chat.pinned > 0` see the chat fall out of the
+				// pinned set when the user unpins from the phone.
+				ev.emit('chats.update', [{ id: evt.jid, pinned: evt.pinned ? evt.timestamp : undefined }])
 				return
 
 			case 'muteUpdate':

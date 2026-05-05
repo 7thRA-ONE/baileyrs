@@ -228,7 +228,13 @@ export const adaptBridgeEvent = (event: WhatsAppEvent, logger?: ILogger): Canoni
 		case 'pin_update': {
 			if (!isObject(data)) return null
 			const jid = asJidString(data.jid)
-			return jid ? { type: 'pinUpdate', jid, timestamp: asNumber(data.timestamp) } : null
+			if (!jid) return null
+			const action = isObject(data.action) ? data.action : undefined
+			// Default to `true` when the bridge omits the flag — historical
+			// payloads only fired on pin (the action node existed = pinned).
+			// Today the bridge surfaces both pin and unpin via `action.pinned`.
+			const pinned = asBoolOr(action?.pinned, true)
+			return { type: 'pinUpdate', jid, timestamp: asNumber(data.timestamp), pinned }
 		}
 
 		case 'mute_update': {
