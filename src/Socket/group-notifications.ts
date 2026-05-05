@@ -241,6 +241,15 @@ const stubRecipesFor = (action: CanonicalGroupAction): StubRecipe[] => {
 }
 
 /**
+ * Process-monotonic counter mixed into stub IDs so two notifications
+ * with the same `(timestamp, stubType, idSuffix)` (e.g. admin renames
+ * a group twice in the same second) generate distinct keys. Without
+ * this, message stores indexed by `key.id` would silently overwrite
+ * the earlier event.
+ */
+let stubIdCounter = 0
+
+/**
  * Build all stub WAMessages a group notification action should fan out to.
  *
  * `fromMe` is computed by the caller (events.ts) from the current user
@@ -254,7 +263,7 @@ export const buildGroupNotificationStubMessages = (notification: CanonicalGroupU
 				key: {
 					remoteJid: notification.groupJid,
 					fromMe,
-					id: `BAE-GP-${notification.timestamp}-${r.stubType}-${r.idSuffix}`,
+					id: `BAE-GP-${notification.timestamp}-${r.stubType}-${r.idSuffix}-${(stubIdCounter++).toString(36)}`,
 					participant: notification.author
 				},
 				participant: notification.author,
