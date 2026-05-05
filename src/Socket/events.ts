@@ -453,9 +453,12 @@ const DISPATCHERS: DispatcherMap = {
 	// ── Chat state ──
 	archiveUpdate: (evt, { ctx }) => ctx.ev.emit('chats.update', [{ id: evt.jid, archived: evt.archived }]),
 	pinUpdate: (evt, { ctx }) =>
-		// Upstream Baileys uses `Chat.pinned` as `number | undefined` —
-		// undefined is the canonical "not pinned" value.
-		ctx.ev.emit('chats.update', [{ id: evt.jid, pinned: evt.pinned ? evt.timestamp : undefined }]),
+		// Upstream Baileys' `chat-utils.ts:878` emits `null` (not
+		// `undefined`) on unpin so consumers using `'pinned' in update`
+		// can distinguish "not touched" from "explicitly unpinned" —
+		// matters for ChatUpdate-shaped diffs where the property's
+		// presence is the signal.
+		ctx.ev.emit('chats.update', [{ id: evt.jid, pinned: evt.pinned ? evt.timestamp : null }]),
 	muteUpdate: (evt, { ctx }) =>
 		// Mirrors upstream `chat-utils.ts:809`: when muted, surface
 		// `muteEndTimestamp` (0 = forever); on unmute, surface `null`.
