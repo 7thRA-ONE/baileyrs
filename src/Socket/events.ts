@@ -47,6 +47,11 @@ const emitCBEvents = (ctx: SocketContext, node: BinaryNode) => {
 	for (const [key, val] of Object.entries(l1)) {
 		if (l2) ws.emit(`${DEF_CALLBACK_PREFIX}${l0},${key}:${val},${l2}`, node)
 		ws.emit(`${DEF_CALLBACK_PREFIX}${l0},${key}:${val}`, node)
+		// Bare-key pattern (no value): upstream `socket.ts:610` emits this
+		// so consumers wiring `ws.on('CB:iq,id', …)` (any id) catch every
+		// stanza carrying that attr. Missing here meant id-pattern matchers
+		// silently never fired.
+		ws.emit(`${DEF_CALLBACK_PREFIX}${l0},${key}`, node)
 	}
 	if (l2) ws.emit(`${DEF_CALLBACK_PREFIX}${l0},,${l2}`, node)
 	ws.emit(`${DEF_CALLBACK_PREFIX}${l0}`, node)
