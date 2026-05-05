@@ -67,6 +67,9 @@ function toMatchObjectImpl(actual: unknown, expected: unknown): void {
 		assert.fail(`toMatchObject expects an object, got ${typeof expected}`)
 	}
 	for (const [key, expVal] of Object.entries(expected as Record<string, unknown>)) {
+		// Catches the case where `expVal === undefined` would otherwise let
+		// a missing key on `actual` pass silently.
+		assert.ok(Object.prototype.hasOwnProperty.call(actual, key), `missing property "${key}"`)
 		const actVal: unknown = (actual as Record<string, unknown>)[key]
 		if (expVal !== null && typeof expVal === 'object' && !Array.isArray(expVal)) {
 			toMatchObjectImpl(actVal, expVal)
