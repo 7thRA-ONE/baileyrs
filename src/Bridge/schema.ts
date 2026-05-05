@@ -453,16 +453,25 @@ const adaptIncomingCall = (data: BridgeData<'incoming_call'>, logger?: ILogger):
 	}
 
 	const canonicalAction: CanonicalCallAction = { type: actionType, callId }
+	// The bridge `CallAction` union narrows variant-specific fields only
+	// on the matching variant. We've already validated `action.type` via
+	// `parseCallActionType`, so a runtime cast through the action's own
+	// shape is safe — reading fields off `unknown` is the cheapest way
+	// around TS's inability to follow our string-normalized discriminator
+	// back into the bridge union.
+	const fields = action as Record<string, unknown>
 	if (actionType === 'offer') {
-		// The bridge `CallAction` union narrows `caller_pn`/`is_video` only
-		// on the `offer` variant. We've already validated `action.type` via
-		// `parseCallActionType`, so a runtime cast through the action's own
-		// shape is safe — reading the fields off `unknown` is the cheapest
-		// way around TS's inability to follow our string-normalized
-		// discriminator back into the bridge union.
-		const offerLike = action as Record<string, unknown>
-		canonicalAction.callerPn = asJidString(offerLike.caller_pn)
-		canonicalAction.isVideo = asBoolOr(offerLike.is_video, false)
+		canonicalAction.callerPn = asJidString(fields.caller_pn)
+		canonicalAction.callerCountryCode = asString(fields.caller_country_code)
+		canonicalAction.deviceClass = asString(fields.device_class)
+		canonicalAction.joinable = asBoolOr(fields.joinable, false)
+		canonicalAction.isVideo = asBoolOr(fields.is_video, false)
+		if (Array.isArray(fields.audio)) {
+			canonicalAction.audio = fields.audio.filter((x): x is string => typeof x === 'string')
+		}
+	} else if (actionType === 'terminate') {
+		canonicalAction.duration = asNumber(fields.duration)
+		canonicalAction.audioDuration = asNumber(fields.audio_duration)
 	}
 
 	return {
@@ -470,6 +479,10 @@ const adaptIncomingCall = (data: BridgeData<'incoming_call'>, logger?: ILogger):
 		from,
 		timestamp: toUnixSeconds(data.timestamp),
 		offline: asBoolOr(data.offline, false),
+		stanzaId: asString(data.stanza_id),
+		notify: asString(data.notify),
+		platform: asString(data.platform),
+		version: asString(data.version),
 		action: canonicalAction
 	}
 }

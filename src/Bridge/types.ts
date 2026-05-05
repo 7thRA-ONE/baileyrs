@@ -287,10 +287,22 @@ export type CanonicalCallActionType = 'offer' | 'preAccept' | 'accept' | 'reject
 export interface CanonicalCallAction {
 	type: CanonicalCallActionType
 	callId: string
-	/** Only populated when `type === 'offer'`. */
+	/** Caller's phone number — present on `offer`. */
 	callerPn?: string
-	/** Only populated when `type === 'offer'`. */
+	/** Caller's ISO country code from the bridge's offer payload. */
+	callerCountryCode?: string
+	/** Device class string (e.g. `"web"`, `"mobile"`). Offer-only. */
+	deviceClass?: string
+	/** `true` for group call invites the recipient can join late. Offer-only. */
+	joinable?: boolean
+	/** Audio codec list advertised on the offer. Offer-only. */
+	audio?: string[]
+	/** `true` for video calls. Offer-only. */
 	isVideo?: boolean
+	/** Total call duration in seconds. Terminate-only. */
+	duration?: number
+	/** Active audio duration in seconds. Terminate-only. */
+	audioDuration?: number
 }
 
 export interface CanonicalIncomingCall {
@@ -298,6 +310,14 @@ export interface CanonicalIncomingCall {
 	from: string
 	timestamp: number
 	offline: boolean
+	/** Stanza-level `id` (distinct from `action.callId`). */
+	stanzaId?: string
+	/** WhatsApp `notify` push name on the offer. */
+	notify?: string
+	/** Platform string (e.g. `"web"`, `"smbi"`). */
+	platform?: string
+	/** WhatsApp client version on the caller side. */
+	version?: string
 	action: CanonicalCallAction
 }
 
