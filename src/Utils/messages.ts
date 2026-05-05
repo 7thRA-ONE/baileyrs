@@ -576,11 +576,8 @@ export const generateWAMessageContent = async (
 	) {
 		const messageType = Object.keys(m)[0]! as Extract<keyof proto.IMessage, MessageWithContextInfo>
 		const key = m[messageType]
-		// `key` is a freshly-created plain object (e.g. `{ text: 'hi' }`) — its
-		// `contextInfo` slot is declared by the proto schema but not yet an own
-		// property, so `'contextInfo' in key` is false and the legacy guarded
-		// assignment silently skipped the mention payload. Match upstream
-		// Baileys: create `contextInfo` if absent, then merge.
+		// `contextInfo` is declared by the proto schema but isn't an own
+		// property on freshly-built messages — create-if-absent, then merge.
 		if (key && typeof key === 'object') {
 			const target = key as { contextInfo?: proto.IContextInfo }
 			const ci = (target.contextInfo ??= {})

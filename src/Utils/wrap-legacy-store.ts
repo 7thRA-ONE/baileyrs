@@ -68,15 +68,10 @@ const STORE_MAP: Record<string, string> = {
 	meta: 'bridge-meta'
 }
 
-// Stores where bridge data is passthrough binary (no conversion).
-// All Signal-protocol records (`identity`, `session`, `sender_key`) now
-// route through converters because every one of them either:
-//   • has a different key shape between bridge and upstream, OR
-//   • has a different value-byte encoding (proto / JSON / 32-vs-33-byte
-//     prefix), OR
-//   • both.
-// Keeping the empty set as an extension point — future bridge stores that
-// are byte-compatible with upstream can land here without a converter.
+// Stores that are byte-compatible between bridge and upstream and so can
+// be persisted unchanged. Currently empty — every Signal record needs
+// either a key rewrite or a value-byte conversion, both handled by
+// `converters` below.
 const BINARY_STORES = new Set<string>()
 
 // Bridge-only stores — raw binary persisted through keys interface.
@@ -1203,14 +1198,9 @@ export async function wrapLegacyStore(
 				return readBinary(type, key)
 			}
 
-			if (route === 'signal') {
-				// `BINARY_STORES` is empty as of the move-to-converter
-				// migration — keeping the branch for future passthrough
-				// stores. No identity fallback needed: identity now goes
-				// through the converter, which handles both the address
-				// rewrite and the 32↔33-byte prefix.
-				return readBinary(type, key)
-			}
+			// `signal` route is currently unreachable (BINARY_STORES is empty);
+			// kept for future byte-compatible stores.
+			if (route === 'signal') return readBinary(type, key)
 
 			if (route === 'bridge-only') return readBinary(type, key)
 

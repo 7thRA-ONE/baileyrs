@@ -126,9 +126,6 @@ export async function useBridgeStore(folder: string): Promise<NonNullable<Authen
 
 			touchCache(cacheKey, value)
 
-			// Critical stores list lives at module scope (see CRITICAL_STORES
-			// at the top). Centralizing it makes the criteria browseable
-			// and adding a new entry is O(1) edit + O(1) check.
 			if (CRITICAL_STORES.has(store)) {
 				const existing = pendingWrites.get(cacheKey)
 				if (existing) {

@@ -403,9 +403,6 @@ const ADAPTERS = {
 	}
 } satisfies AdapterMap
 
-// `as const` would be ideal but it widens to `Readonly<AdapterMap>` and
-// breaks the dynamic key indexing below. Just use the satisfies form.
-
 /** Set of bridge event types we explicitly handle — derived from the table. */
 export const KNOWN_BRIDGE_EVENT_TYPES: ReadonlySet<string> = new Set(Object.keys(ADAPTERS))
 

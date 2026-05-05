@@ -1,23 +1,10 @@
 /**
  * Canonical → Baileys event dispatcher.
  *
- * Architecture:
- *   1. `adaptBridgeEvent` (Bridge/schema.ts) turns the raw bridge runtime
- *      event into a typed `CanonicalEvent` discriminated union — that's
- *      our domain contract.
- *   2. `DISPATCHERS` here is a `{ [K in CanonicalEvent['type']]: … }`
- *      mapped type — TS forces a handler per variant. Adding a new
- *      canonical variant without a dispatcher is a compile error.
- *   3. Each dispatcher receives a `DispatchCtx` (closure-captured
- *      EventEmitter, logger, callbacks, etc.) and the narrow event
- *      payload — no `as` casts, no `unknown` field access.
- *
- * The previous switch-based design had three implicit failure modes:
- *   • Missing case (no `assertNever`) compiled silently.
- *   • `ev.emit('chats.update', […] as Partial<…>)` casts hid shape errors.
- *   • Adding a new bridge event variant required edits in three files
- *     before the type-checker noticed anything missing.
- * The mapped-type table closes all three.
+ * `adaptBridgeEvent` (Bridge/schema.ts) yields a `CanonicalEvent`
+ * discriminated union; `DISPATCHERS` is a `{ [K in CanonicalEvent['type']]: … }`
+ * mapped type so TS forces a handler per variant — a missing handler
+ * is a compile error.
  */
 
 import type { WhatsAppEvent } from 'whatsapp-rust-bridge'

@@ -52,10 +52,6 @@ export const makeMessageMethods = (ctx: SocketContext) => ({
 		jid: string,
 		content: AnyMessageContent,
 		options?: Omit<MessageGenerationOptions, 'waClient' | 'logger' | 'userJid' | 'mediaInNote'>
-		// Every code path below either returns `fullMsg` or throws —
-		// matching upstream's contract (`Promise<WAMessage>`). The previous
-		// `| undefined` return type was a leftover from when the function
-		// optionally bailed without sending; today it's a strict promise.
 	): Promise<WAMessage> => {
 		const client = await ctx.getClient()
 		const user = ctx.getUser()

@@ -95,7 +95,7 @@ export const extractImageThumb = async (bufferOrFilePath: Readable | Buffer | st
 	}
 }
 
-/** gets the SHA256 of the given media message */
+/** Returns audio duration in seconds, parsed via `music-metadata`. */
 export async function getAudioDuration(buffer: Buffer | string | Readable) {
 	const musicMetadata = await import('music-metadata')
 	let metadata: IAudioMetadata
