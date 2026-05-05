@@ -23,11 +23,23 @@
 import type { WhatsAppEvent } from 'whatsapp-rust-bridge'
 import type { CanonicalEvent, CanonicalMessage } from '../Bridge/index.ts'
 import { adaptBridgeEvent } from '../Bridge/index.ts'
-import type { BaileysEventMap, BinaryNode, ConnectionState, WACallEvent, WACallUpdateType, WAMessage, WAPresence } from '../Types/index.ts'
+import type {
+	BaileysEventMap,
+	BinaryNode,
+	ConnectionState,
+	WACallEvent,
+	WACallUpdateType,
+	WAMessage,
+	WAPresence
+} from '../Types/index.ts'
 import { DisconnectReason, WAProto } from '../Types/index.ts'
 import { Boom } from '../Utils/boom.ts'
 import { isJidGroup } from '../WABinary/jid-utils.ts'
-import { buildGroupJoinRequestEvents, buildGroupNotificationDomainEvent, buildGroupNotificationStubMessages } from './group-notifications.ts'
+import {
+	buildGroupJoinRequestEvents,
+	buildGroupNotificationDomainEvent,
+	buildGroupNotificationStubMessages
+} from './group-notifications.ts'
 import { mapReachoutTimelock } from './reachout.ts'
 import type { SocketContext } from './types.ts'
 
@@ -224,7 +236,10 @@ const DISPATCHERS: DispatcherMap = {
 		ctx.ev.emit('connection.update', {
 			connection: 'close',
 			lastDisconnect: {
-				error: new Boom(message, { statusCode: DisconnectReason.forbidden, data: { code: evt.code, expire: evt.expire } }),
+				error: new Boom(message, {
+					statusCode: DisconnectReason.forbidden,
+					data: { code: evt.code, expire: evt.expire }
+				}),
 				date: new Date()
 			}
 		} as Partial<ConnectionState>)
@@ -526,10 +541,16 @@ const DISPATCHERS: DispatcherMap = {
 			else ctx.logger.warn({ payload: evt.payload }, 'reachout-timelock push: payload missing expected fields')
 			return
 		}
-		ctx.logger.trace({ opName: evt.opName, offline: evt.offline }, 'bridge mex notification with no Baileys mapping (drop)')
+		ctx.logger.trace(
+			{ opName: evt.opName, offline: evt.offline },
+			'bridge mex notification with no Baileys mapping (drop)'
+		)
 	},
 	noop: (evt, { ctx }) =>
-		ctx.logger.trace({ bridgeType: evt.bridgeType, detail: evt.detail }, 'bridge event acknowledged (no Baileys equivalent)'),
+		ctx.logger.trace(
+			{ bridgeType: evt.bridgeType, detail: evt.detail },
+			'bridge event acknowledged (no Baileys equivalent)'
+		),
 
 	lidMappingUpdate: (evt, { ctx }) => {
 		// Mirror upstream `messages-recv.ts:287`: one `lid-mapping.update`
@@ -584,7 +605,6 @@ const DISPATCHERS: DispatcherMap = {
 				ephemeralSettingTimestamp: evt.settingTimestamp
 			}
 		]),
-
 
 	historySync: (evt, { ctx }) => {
 		// 1:1 with upstream `process-message.ts:371-376`. `isLatest` is true
