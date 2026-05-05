@@ -195,6 +195,8 @@ export interface CanonicalGroupUpdate {
 export interface CanonicalArchiveUpdate {
 	type: 'archiveUpdate'
 	jid: string
+	/** `false` when the user unarchived. Drives `chats.update.archived: false`. */
+	archived: boolean
 }
 
 export interface CanonicalPinUpdate {

@@ -238,7 +238,7 @@ export const makeEventHandler = (
 
 			// ── Chat state ──
 			case 'archiveUpdate':
-				ev.emit('chats.update', [{ id: evt.jid, archived: true }])
+				ev.emit('chats.update', [{ id: evt.jid, archived: evt.archived }])
 				return
 
 			case 'pinUpdate':

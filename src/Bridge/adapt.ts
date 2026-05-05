@@ -222,7 +222,12 @@ export const adaptBridgeEvent = (event: WhatsAppEvent, logger?: ILogger): Canoni
 		case 'archive_update': {
 			if (!isObject(data)) return null
 			const jid = asJidString(data.jid)
-			return jid ? { type: 'archiveUpdate', jid } : null
+			if (!jid) return null
+			const action = isObject(data.action) ? data.action : undefined
+			// Default to `true` for legacy bridge payloads. Bridge today
+			// surfaces ArchiveChatAction.archived for both directions.
+			const archived = asBoolOr(action?.archived, true)
+			return { type: 'archiveUpdate', jid, archived }
 		}
 
 		case 'pin_update': {

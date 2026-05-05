@@ -284,12 +284,20 @@ describe('adaptBridgeEvent — anti-corruption layer', () => {
 	})
 
 	describe('chat state', () => {
-		it('archive_update maps to canonical archiveUpdate', () => {
+		it('archive_update maps to canonical archiveUpdate (default archived=true)', () => {
 			const result = adaptBridgeEvent({
 				type: 'archive_update',
 				data: { jid: { user: '5511', server: 's.whatsapp.net' } }
 			} as never)
-			expect(result).toEqual({ type: 'archiveUpdate', jid: '5511@s.whatsapp.net' })
+			expect(result).toEqual({ type: 'archiveUpdate', jid: '5511@s.whatsapp.net', archived: true })
+		})
+
+		it('archive_update propagates action.archived=false (unarchive)', () => {
+			const result = adaptBridgeEvent({
+				type: 'archive_update',
+				data: { jid: { user: '5511', server: 's.whatsapp.net' }, action: { archived: false } }
+			} as never)
+			expect(result).toEqual({ type: 'archiveUpdate', jid: '5511@s.whatsapp.net', archived: false })
 		})
 
 		it('star_update reads action.starred even when wrapped', () => {
