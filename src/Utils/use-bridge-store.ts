@@ -90,15 +90,41 @@ export async function useBridgeStore(folder: string): Promise<NonNullable<Authen
 
 			touchCache(cacheKey, value)
 
-			// Signal sessions and identity keys must be flushed immediately —
-			// losing a ratchet step on crash causes undecryptable messages.
-			// `prekey` is critical too: a prekey we said was consumed must be
-			// durably consumed, otherwise we'd reuse it for a different peer
-			// and the server rejects the bundle. `sync_key` (app-state) gates
-			// every subsequent app-state mutation — losing it on SIGKILL
-			// causes a permanent gap until full re-sync.
+			// Stores whose loss on SIGKILL produces undecryptable messages
+			// or permanent app-state divergence. Each entry below carries a
+			// reason — promoting a store to "critical" doubles disk I/O,
+			// so don't add anything here that can be re-derived from the
+			// network.
+			//
+			//   `session` / `identity` — Signal session ratchet steps. Lose
+			//      one step → next inbound message from peer undecryptable.
+			//   `device` — own device record (noiseKey, signedIdentityKey,
+			//      adv_secret_key). Loss = forced re-pair.
+			//   `prekey` — consumed prekey must be durably consumed; reuse
+			//      on a different peer makes the server reject the bundle.
+			//   `sync_key` — app-state HMAC key. Loss → permanent gap in
+			//      app-state mutations until full re-sync.
+			//   `sender_key` — group-message ratchet (same model as
+			//      `session`, but per group). Lose a step → next inbound
+			//      message from the same group undecryptable. Was missing
+			//      from the critical set; SIGKILL during a group send was
+			//      the worst-case scenario.
+			//   `sync_version` — LTHash state per app-state collection
+			//      (regular_high / regular_low / critical_block / etc.).
+			//      Gates every mutation MAC verification — lose it and
+			//      every subsequent app-state action throws "hash mismatch"
+			//      until full re-sync. Same severity as `sync_key`.
+			//   `mutation_mac` — replay-protection cache for app-state
+			//      mutations. Loss can let a replayed mutation re-apply.
 			const critical =
-				store === 'session' || store === 'identity' || store === 'device' || store === 'prekey' || store === 'sync_key'
+				store === 'session' ||
+				store === 'identity' ||
+				store === 'device' ||
+				store === 'prekey' ||
+				store === 'sync_key' ||
+				store === 'sender_key' ||
+				store === 'sync_version' ||
+				store === 'mutation_mac'
 			if (critical) {
 				const existing = pendingWrites.get(cacheKey)
 				if (existing) {
