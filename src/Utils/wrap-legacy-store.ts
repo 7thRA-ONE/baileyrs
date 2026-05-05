@@ -99,11 +99,16 @@ interface BridgeJid {
 }
 
 /** Reconstruct a JID string from the bridge's serialized Jid object.
- *  Format: "user:device@server" (device omitted when 0). */
+ *  Format: `user[_<agent>][:<device>]@<server>`. The agent suffix is
+ *  required to round-trip hosted Business accounts (`5511_2@hosted`) —
+ *  `credsToDeviceJson` stores it, so the load path must also emit it.
+ *  Without this, `creds.me.id` would lose the `_<agent>` half on every
+ *  reload and the next `credsToDeviceJson` save would zero `agent`. */
 function bridgeJidToString(j: BridgeJid | null | undefined): string | null {
 	if (!j?.user || !j?.server) return null
+	const agent = j.agent ?? 0
 	const device = j.device ?? 0
-	return `${j.user}${device > 0 ? ':' + device : ''}@${j.server}`
+	return `${j.user}${agent > 0 ? '_' + agent : ''}${device > 0 ? ':' + device : ''}@${j.server}`
 }
 
 /** Typed subset of the bridge Device JSON we read back in updateCredsFromDevice. */
