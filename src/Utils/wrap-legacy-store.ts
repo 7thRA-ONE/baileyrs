@@ -1071,7 +1071,7 @@ export async function wrapLegacyStore(
 		if (credsTimer) clearTimeout(credsTimer)
 		credsTimer = setTimeout(() => {
 			credsTimer = null
-			saveCreds().catch(() => {})
+			saveCreds().catch(err => warn('saveCreds failed', err))
 		}, 100)
 	}
 
@@ -1271,7 +1271,7 @@ export async function wrapLegacyStore(
 		dispose() {
 			if (credsTimer) {
 				clearTimeout(credsTimer)
-				saveCreds().catch(() => {})
+				saveCreds().catch(err => warn('saveCreds failed during dispose', err))
 			}
 		}
 	}

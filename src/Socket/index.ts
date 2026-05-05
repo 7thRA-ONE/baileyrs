@@ -269,6 +269,11 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 
 	let pairedAccount: { platform?: string; businessName?: string } | undefined
 	let cachedAccount: proto.IAdvSignedDeviceIdentity | undefined
+	// Holds the wrapped store created when the user passed legacy
+	// `auth: { creds, keys }` instead of `auth.store`. We need it in
+	// `end()` to drain the debounced `saveCreds` timer — `auth.store?.flush?.()`
+	// covers the explicit-store path but not this one.
+	let autoWrappedStore: { flush?: () => Promise<void> } | undefined
 
 	const ctx: SocketContext = {
 		ev,
@@ -334,13 +339,19 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 		let bridgeStore = auth.store ?? null
 		if (!bridgeStore && auth.creds && auth.keys) {
 			const legacyState = { creds: auth.creds, keys: auth.keys }
-			bridgeStore = await wrapLegacyStore(
+			const wrapped = await wrapLegacyStore(
 				legacyState,
 				async () => {
 					ev.emit('creds.update', auth.creds!)
 				},
 				logger
 			)
+			bridgeStore = wrapped
+			// Stash on the closure so `end()` can drain the debounced
+			// `saveCreds` timer. `auth.store?.flush?.()` only runs when the
+			// caller passed an explicit store — this auto-wrap path needs
+			// its own hook.
+			autoWrappedStore = wrapped
 			logger.debug('auth: auto-wrapped legacy {creds, keys} via wrapLegacyStore')
 		}
 
@@ -412,6 +423,12 @@ const makeWASocket = (config: UserFacingSocketConfig) => {
 
 			try {
 				await auth.store?.flush?.()
+			} catch {
+				/* ignore */
+			}
+
+			try {
+				await autoWrappedStore?.flush?.()
 			} catch {
 				/* ignore */
 			}
