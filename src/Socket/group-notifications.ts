@@ -73,13 +73,14 @@ export const buildGroupJoinRequestEvents = (
 	notification: CanonicalGroupUpdate
 ): BaileysEventMap['group.join-request'][] => {
 	const action = notification.action
-	const author = notification.author ?? ''
+	const author = notification.author
 	const authorPn = notification.authorPn
 
 	if (action.type === 'membershipApprovalRequest') {
-		// Single user requesting join. Upstream emits with action='created'
-		// and the participant being the requester (which IS the `author` of
-		// the notification).
+		// Single user requesting join. The author IS the requester, so
+		// without a real author there is no addressable participant —
+		// dropping the event beats emitting one with `participant: ''`.
+		if (!author) return []
 		return [
 			{
 				id: notification.groupJid,
@@ -95,31 +96,38 @@ export const buildGroupJoinRequestEvents = (
 
 	if (action.type === 'createdMembershipRequests') {
 		// Batched fanout (typically community parent → linked group). Emit
-		// one event per request entry.
+		// one event per request entry; skip entries without a participant
+		// JID rather than synthesizing blanks.
+		if (!author) return []
 		const method = validateRequestMethod(action.requestMethod)
-		return action.requests.map(req => ({
-			id: notification.groupJid,
-			author,
-			authorPn,
-			participant: req.jid,
-			participantPn: req.phoneNumber,
-			action: 'created',
-			method
-		}))
+		return action.requests
+			.filter(req => !!req.jid)
+			.map(req => ({
+				id: notification.groupJid,
+				author,
+				authorPn,
+				participant: req.jid,
+				participantPn: req.phoneNumber,
+				action: 'created',
+				method
+			}))
 	}
 
 	if (action.type === 'revokedMembershipRequests') {
 		// Admin revoked one or more pending requests. Method is unknown at
 		// this point (server doesn't echo the original method back).
-		return action.participants.map(p => ({
-			id: notification.groupJid,
-			author,
-			authorPn,
-			participant: p.jid,
-			participantPn: p.phoneNumber,
-			action: 'revoked',
-			method: undefined
-		}))
+		if (!author) return []
+		return action.participants
+			.filter(p => !!p.jid)
+			.map(p => ({
+				id: notification.groupJid,
+				author,
+				authorPn,
+				participant: p.jid,
+				participantPn: p.phoneNumber,
+				action: 'revoked',
+				method: undefined
+			}))
 	}
 
 	return []
