@@ -49,8 +49,13 @@ export async function useBridgeStore(folder: string): Promise<NonNullable<Authen
 	}
 
 	const flushAll = async () => {
-		const keys = [...pendingWrites.keys()]
-		await Promise.all(keys.map(flushWrite))
+		// Drain in a loop because new sets can land while we're awaiting the
+		// previous batch's writeFile. Without this, callers in shutdown paths
+		// that race with in-flight `set()` calls miss the tail.
+		while (pendingWrites.size > 0) {
+			const keys = [...pendingWrites.keys()]
+			await Promise.all(keys.map(flushWrite))
+		}
 	}
 
 	return {
@@ -87,7 +92,13 @@ export async function useBridgeStore(folder: string): Promise<NonNullable<Authen
 
 			// Signal sessions and identity keys must be flushed immediately —
 			// losing a ratchet step on crash causes undecryptable messages.
-			const critical = store === 'session' || store === 'identity' || store === 'device'
+			// `prekey` is critical too: a prekey we said was consumed must be
+			// durably consumed, otherwise we'd reuse it for a different peer
+			// and the server rejects the bundle. `sync_key` (app-state) gates
+			// every subsequent app-state mutation — losing it on SIGKILL
+			// causes a permanent gap until full re-sync.
+			const critical =
+				store === 'session' || store === 'identity' || store === 'device' || store === 'prekey' || store === 'sync_key'
 			if (critical) {
 				const existing = pendingWrites.get(cacheKey)
 				if (existing) {
