@@ -32,10 +32,17 @@ export const assertNodeErrorFree = (node: BinaryNode): void => {
 	const errNode = getBinaryNodeChild(node, 'error')
 	if (errNode) {
 		const code = errNode.attrs?.code
-		const statusCode = typeof code === 'string' ? Number.parseInt(code, 10) : undefined
+		// Single parse for both `statusCode` and `data` — the previous
+		// implementation parsed twice (parseInt + Number) which could
+		// disagree on edge cases (e.g. `Number('')` is 0 but
+		// `parseInt('', 10)` is NaN). When the server sent a non-numeric
+		// code, fall back to 500 for statusCode but preserve the original
+		// string in `data` so callers can still inspect the wire value.
+		const parsed = typeof code === 'string' ? Number.parseInt(code, 10) : undefined
+		const statusCode = Number.isFinite(parsed) ? (parsed as number) : 500
 		throw new Boom(errNode.attrs?.text || 'Unknown error', {
-			statusCode: Number.isFinite(statusCode) ? statusCode : 500,
-			data: code != null ? Number(code) : undefined
+			statusCode,
+			data: Number.isFinite(parsed) ? parsed : code
 		})
 	}
 }

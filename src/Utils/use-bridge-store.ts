@@ -4,6 +4,42 @@ import { join } from 'node:path'
 import type { AuthenticationState } from '../Types/index.ts'
 
 /**
+ * Stores whose loss on SIGKILL produces undecryptable messages or
+ * permanent app-state divergence. Each entry below carries a reason —
+ * promoting a store to "critical" doubles disk I/O, so don't add
+ * anything here that can be re-derived from the network.
+ *
+ *   `session` / `identity` — Signal session ratchet steps. Lose
+ *      one step → next inbound message from peer undecryptable.
+ *   `device` — own device record (noiseKey, signedIdentityKey,
+ *      adv_secret_key). Loss = forced re-pair.
+ *   `prekey` — consumed prekey must be durably consumed; reuse
+ *      on a different peer makes the server reject the bundle.
+ *   `sync_key` — app-state HMAC key. Loss → permanent gap in
+ *      app-state mutations until full re-sync.
+ *   `sender_key` — group-message ratchet (same model as `session`,
+ *      but per group). Lose a step → next inbound message from the
+ *      same group undecryptable.
+ *   `sync_version` — LTHash state per app-state collection
+ *      (regular_high / regular_low / critical_block / etc.). Gates
+ *      every mutation MAC verification — lose it and every
+ *      subsequent app-state action throws "hash mismatch" until
+ *      full re-sync.
+ *   `mutation_mac` — replay-protection cache for app-state
+ *      mutations. Loss can let a replayed mutation re-apply.
+ */
+const CRITICAL_STORES: ReadonlySet<string> = new Set([
+	'session',
+	'identity',
+	'device',
+	'prekey',
+	'sync_key',
+	'sender_key',
+	'sync_version',
+	'mutation_mac'
+])
+
+/**
  * Creates a file-based store for the WASM bridge.
  *
  * Each (store, key) pair maps to a file: `<folder>/<store>-<key>.bin`
@@ -90,42 +126,10 @@ export async function useBridgeStore(folder: string): Promise<NonNullable<Authen
 
 			touchCache(cacheKey, value)
 
-			// Stores whose loss on SIGKILL produces undecryptable messages
-			// or permanent app-state divergence. Each entry below carries a
-			// reason — promoting a store to "critical" doubles disk I/O,
-			// so don't add anything here that can be re-derived from the
-			// network.
-			//
-			//   `session` / `identity` — Signal session ratchet steps. Lose
-			//      one step → next inbound message from peer undecryptable.
-			//   `device` — own device record (noiseKey, signedIdentityKey,
-			//      adv_secret_key). Loss = forced re-pair.
-			//   `prekey` — consumed prekey must be durably consumed; reuse
-			//      on a different peer makes the server reject the bundle.
-			//   `sync_key` — app-state HMAC key. Loss → permanent gap in
-			//      app-state mutations until full re-sync.
-			//   `sender_key` — group-message ratchet (same model as
-			//      `session`, but per group). Lose a step → next inbound
-			//      message from the same group undecryptable. Was missing
-			//      from the critical set; SIGKILL during a group send was
-			//      the worst-case scenario.
-			//   `sync_version` — LTHash state per app-state collection
-			//      (regular_high / regular_low / critical_block / etc.).
-			//      Gates every mutation MAC verification — lose it and
-			//      every subsequent app-state action throws "hash mismatch"
-			//      until full re-sync. Same severity as `sync_key`.
-			//   `mutation_mac` — replay-protection cache for app-state
-			//      mutations. Loss can let a replayed mutation re-apply.
-			const critical =
-				store === 'session' ||
-				store === 'identity' ||
-				store === 'device' ||
-				store === 'prekey' ||
-				store === 'sync_key' ||
-				store === 'sender_key' ||
-				store === 'sync_version' ||
-				store === 'mutation_mac'
-			if (critical) {
+			// Critical stores list lives at module scope (see CRITICAL_STORES
+			// at the top). Centralizing it makes the criteria browseable
+			// and adding a new entry is O(1) edit + O(1) check.
+			if (CRITICAL_STORES.has(store)) {
 				const existing = pendingWrites.get(cacheKey)
 				if (existing) {
 					clearTimeout(existing.timer)
