@@ -1286,10 +1286,24 @@ export async function wrapLegacyStore(
 		},
 
 		async flush() {
-			if (credsTimer) {
+			// Drain in a loop because `set('device', ...)` calls landing
+			// during `await saveCreds()` queue a fresh `credsTimer`. A
+			// single-pass flush would leave the latest creds on the timer
+			// — `dispose()` then fires saveCreds() but the orchestrator
+			// has already moved on (`free()`), so the write is racing
+			// against process exit. Looping until the timer is null after
+			// a save closes the window deterministically. Bounded by a
+			// small max-iterations guard so a saveCreds() that re-emits
+			// credentials in a tight loop can't lock us forever.
+			for (let i = 0; i < 32 && credsTimer; i++) {
 				clearTimeout(credsTimer)
 				credsTimer = null
 				await saveCreds()
+			}
+			if (credsTimer) {
+				warn('flush hit max-iterations cap; pending credsTimer dropped — saveCreds may be re-emitting in a loop')
+				clearTimeout(credsTimer)
+				credsTimer = null
 			}
 		},
 
