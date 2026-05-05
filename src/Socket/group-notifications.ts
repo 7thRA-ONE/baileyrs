@@ -46,6 +46,25 @@ export type GroupNotificationDomainEvent =
 	| null
 
 /**
+ * Whitelist of `RequestJoinMethod` values upstream Baileys recognizes.
+ * The bridge's `MembershipRequestMethod` is a wire-string enum that may
+ * grow with new variants; validating here keeps an unknown server-side
+ * method from leaking into consumer code as a typed but invalid value.
+ */
+const KNOWN_REQUEST_METHODS = new Set<NonNullable<BaileysEventMap['group.join-request']['method']>>([
+	'invite_link',
+	'linked_group_join',
+	'non_admin_add'
+])
+
+const validateRequestMethod = (raw: string | undefined): BaileysEventMap['group.join-request']['method'] => {
+	if (!raw) return undefined
+	return KNOWN_REQUEST_METHODS.has(raw as NonNullable<BaileysEventMap['group.join-request']['method']>)
+		? (raw as BaileysEventMap['group.join-request']['method'])
+		: undefined
+}
+
+/**
  * Build all `group.join-request` events a notification fans out to —
  * upstream emits one event per affected participant. Returns an empty
  * array for non-join-request actions.
@@ -69,7 +88,7 @@ export const buildGroupJoinRequestEvents = (
 				participant: author,
 				participantPn: authorPn,
 				action: 'created',
-				method: action.requestMethod as BaileysEventMap['group.join-request']['method']
+				method: validateRequestMethod(action.requestMethod)
 			}
 		]
 	}
@@ -77,6 +96,7 @@ export const buildGroupJoinRequestEvents = (
 	if (action.type === 'createdMembershipRequests') {
 		// Batched fanout (typically community parent → linked group). Emit
 		// one event per request entry.
+		const method = validateRequestMethod(action.requestMethod)
 		return action.requests.map(req => ({
 			id: notification.groupJid,
 			author,
@@ -84,7 +104,7 @@ export const buildGroupJoinRequestEvents = (
 			participant: req.jid,
 			participantPn: req.phoneNumber,
 			action: 'created',
-			method: action.requestMethod as BaileysEventMap['group.join-request']['method']
+			method
 		}))
 	}
 
