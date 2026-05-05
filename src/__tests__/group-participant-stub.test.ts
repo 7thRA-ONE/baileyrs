@@ -87,7 +87,9 @@ describe('events — participant stub message synthesis', () => {
 		const upsert0 = captured.upsert[0]!
 		const stubMsg = upsert0.messages[0]!
 		expect(stubMsg.messageStubType).toBe(STUB.GROUP_PARTICIPANT_PROMOTE)
-		expect(stubMsg.messageStubParameters).toEqual(['271060335329480@lid'])
+		// stubParameters is JSON.stringify({ id, phoneNumber? }) — matches
+		// upstream `messages-recv.ts:714` so process-message.ts JSON.parse works.
+		expect(stubMsg.messageStubParameters).toEqual([JSON.stringify({ id: '271060335329480@lid' })])
 		expect(stubMsg.key!.remoteJid).toBe('120363012345678901@g.us')
 		expect(stubMsg.key!.participant).toBe('550000000000001@lid')
 		expect(stubMsg.key!.fromMe).toBe(false)
@@ -144,8 +146,8 @@ describe('events — participant stub message synthesis', () => {
 		expect(captured.upsert).toHaveLength(1)
 		const msgs = captured.upsert[0]!.messages
 		expect(msgs).toHaveLength(2)
-		expect(msgs[0]!.messageStubParameters).toEqual(['111@lid'])
-		expect(msgs[1]!.messageStubParameters).toEqual(['222@lid'])
+		expect(msgs[0]!.messageStubParameters).toEqual([JSON.stringify({ id: '111@lid' })])
+		expect(msgs[1]!.messageStubParameters).toEqual([JSON.stringify({ id: '222@lid' })])
 		// IDs must be unique within the batch — sung's iniciar.js dedups
 		// `messages.upsert` by `key.id`, so duplicate ids would silently drop
 		// every participant after the first.

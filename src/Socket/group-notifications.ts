@@ -124,11 +124,20 @@ interface StubRecipe {
 const stubRecipesFor = (action: CanonicalGroupAction): StubRecipe[] => {
 	if (isParticipantAction(action)) {
 		const stubType = PARTICIPANT_STUBS[action.type]
-		return action.participants.map((p, idx) => ({
-			stubType,
-			stubParams: [p.jid],
-			idSuffix: `${idx}-${p.jid.split('@')[0]}`
-		}))
+		// Match upstream `messages-recv.ts:714`: each stubParameter is a
+		// `JSON.stringify({ id, phoneNumber? })`. Upstream `process-message.ts`
+		// (`:630, :635, …`) `JSON.parse`s these — bare jids would crash that
+		// path. Keeping the shape compatible lets bots that delegate to
+		// upstream's process-message keep working.
+		return action.participants.map((p, idx) => {
+			const entry: { id: string; phoneNumber?: string } = { id: p.jid }
+			if (p.phoneNumber) entry.phoneNumber = p.phoneNumber
+			return {
+				stubType,
+				stubParams: [JSON.stringify(entry)],
+				idSuffix: `${idx}-${p.jid.split('@')[0]}`
+			}
+		})
 	}
 
 	switch (action.type) {
