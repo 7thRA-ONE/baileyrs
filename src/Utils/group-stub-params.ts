@@ -19,9 +19,11 @@ export interface StubParticipantPayload {
 	phoneNumber?: string
 }
 
+const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v !== ''
+
 export const encodeStubParticipant = (p: StubParticipantPayload): StubParticipantParam => {
 	const out: StubParticipantPayload = { id: p.id }
-	if (p.phoneNumber) out.phoneNumber = p.phoneNumber
+	if (isNonEmptyString(p.phoneNumber)) out.phoneNumber = p.phoneNumber
 	return JSON.stringify(out) as StubParticipantParam
 }
 
@@ -43,6 +45,6 @@ export const decodeStubParticipant = (raw: string | null | undefined): StubParti
 	const obj = parsed as Record<string, unknown>
 	if (typeof obj.id !== 'string') return null
 	const out: StubParticipantPayload = { id: obj.id }
-	if (typeof obj.phoneNumber === 'string') out.phoneNumber = obj.phoneNumber
+	if (isNonEmptyString(obj.phoneNumber)) out.phoneNumber = obj.phoneNumber
 	return out
 }
