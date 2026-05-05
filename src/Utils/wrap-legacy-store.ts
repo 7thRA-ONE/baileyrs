@@ -768,6 +768,25 @@ function upstreamSessionRecordToProto(record: unknown): Uint8Array {
 
 // ---- Device/Creds ----
 
+/**
+ * Extract the literal `_<n>` agent suffix from a raw JID. `jidDecode`
+ * folds it into `domainType` only for plain `s.whatsapp.net`; for special
+ * servers (`hosted`, `hosted.lid`) it is parsed-then-discarded because
+ * `domainType` is taken from the server. The bridge's `Jid.agent`
+ * field needs the literal number, so recover it here.
+ */
+function jidAgent(rawJid: string | undefined | null): number {
+	if (!rawJid) return 0
+	const atIdx = rawJid.indexOf('@')
+	if (atIdx < 0) return 0
+	const userPart = rawJid.slice(0, atIdx).split(':', 1)[0]
+	if (!userPart) return 0
+	const sepIdx = userPart.indexOf('_')
+	if (sepIdx < 0) return 0
+	const n = parseInt(userPart.slice(sepIdx + 1), 10)
+	return Number.isFinite(n) ? n : 0
+}
+
 function credsToDeviceJson(creds: AuthenticationCreds): Uint8Array {
 	/** Serialize a key pair as [private(32) + public(32)] matching Rust key_pair_serde */
 	const kp = (pair: { public: Uint8Array; private: Uint8Array } | undefined): number[] => {
@@ -778,12 +797,16 @@ function credsToDeviceJson(creds: AuthenticationCreds): Uint8Array {
 	const pnJid = jidDecode(creds.me?.id)
 	const lidJid = jidDecode(creds.me?.lid)
 	const deviceNum = pnJid?.device ?? lidJid?.device ?? 0
+	const pnAgent = jidAgent(creds.me?.id)
+	const lidAgent = jidAgent(creds.me?.lid)
 
-	// Preserve `server` so hosted / hosted.lid accounts survive migration.
+	// Preserve `server` and recover the literal `_<n>` agent suffix so
+	// hosted / hosted.lid accounts (e.g. `5511_2@hosted`) survive a
+	// drop-in migration from upstream Baileys.
 	return toJson({
-		pn: pnJid ? { user: pnJid.user, server: pnJid.server, device: deviceNum, agent: 0, integrator: 0 } : null,
+		pn: pnJid ? { user: pnJid.user, server: pnJid.server, device: deviceNum, agent: pnAgent, integrator: 0 } : null,
 		lid: lidJid
-			? { user: lidJid.user, server: lidJid.server, device: lidJid.device ?? 0, agent: 0, integrator: 0 }
+			? { user: lidJid.user, server: lidJid.server, device: lidJid.device ?? 0, agent: lidAgent, integrator: 0 }
 			: null,
 		registration_id: creds.registrationId ?? 0,
 		noise_key: kp(creds.noiseKey),
