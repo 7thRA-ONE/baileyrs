@@ -110,6 +110,12 @@ export interface CanonicalReceipt {
 	isFromMe: boolean
 	messageIds: string[]
 	timestamp: number
+	/**
+	 * Bridge `ReceiptType` discriminator (already normalized to the
+	 * variant string — no `data` payload preserved). Drives the
+	 * `readTimestamp` / `playedTimestamp` slot in the emitted update.
+	 */
+	receiptType?: 'delivered' | 'sender' | 'retry' | 'read' | 'read-self' | 'played' | 'played-self' | 'inactive' | 'other'
 }
 
 // ── Contacts ──

@@ -168,17 +168,26 @@ export const makeEventHandler = (
 			}
 
 			case 'receipt': {
-				ev.emit('message-receipt.update', [
-					{
-						key: {
-							remoteJid: evt.chatJid,
-							id: evt.messageIds[0]!,
-							fromMe: evt.isFromMe,
-							participant: evt.isGroup ? evt.senderJid : undefined
-						},
-						receipt: { receiptTimestamp: evt.timestamp }
-					}
-				])
+				// Fan out one MessageUserReceiptUpdate per id (upstream emits
+				// per-id) and pick the timestamp slot from the receipt type
+				// so consumers branching on `receipt.readTimestamp` /
+				// `receipt.playedTimestamp` see the right field populated.
+				const participant = evt.isGroup ? evt.senderJid : undefined
+				const receipt: { receiptTimestamp?: number; readTimestamp?: number; playedTimestamp?: number } = {}
+				if (evt.receiptType === 'read' || evt.receiptType === 'read-self') {
+					receipt.readTimestamp = evt.timestamp
+				} else if (evt.receiptType === 'played' || evt.receiptType === 'played-self') {
+					receipt.playedTimestamp = evt.timestamp
+				} else {
+					receipt.receiptTimestamp = evt.timestamp
+				}
+				ev.emit(
+					'message-receipt.update',
+					evt.messageIds.map(id => ({
+						key: { remoteJid: evt.chatJid, id, fromMe: evt.isFromMe, participant },
+						receipt
+					}))
+				)
 				return
 			}
 

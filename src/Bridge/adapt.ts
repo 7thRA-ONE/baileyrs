@@ -392,7 +392,40 @@ const adaptReceipt = (data: unknown, logger?: ILogger): CanonicalEvent | null =>
 		isGroup,
 		isFromMe: asBoolOr(src.is_from_me, false),
 		messageIds: ids,
-		timestamp: toUnixSeconds(data.timestamp)
+		timestamp: toUnixSeconds(data.timestamp),
+		receiptType: parseReceiptType(data.type)
+	}
+}
+
+const parseReceiptType = (raw: unknown): import('./types.ts').CanonicalReceipt['receiptType'] => {
+	// Bridge serializes `ReceiptType` as either the bare string (`"read"`) or
+	// the tagged form (`{ type: "read" }`) depending on serde config — accept
+	// both. Variants we don't have an upstream slot for collapse to 'other'.
+	let norm: string | undefined
+	if (typeof raw === 'string') norm = raw
+	else if (isObject(raw) && typeof raw.type === 'string') norm = raw.type
+	switch (norm) {
+		case 'delivered':
+			return 'delivered'
+		case 'sender':
+			return 'sender'
+		case 'retry':
+		case 'enc_rekey_retry':
+			return 'retry'
+		case 'read':
+			return 'read'
+		case 'read_self':
+			return 'read-self'
+		case 'played':
+			return 'played'
+		case 'played_self':
+			return 'played-self'
+		case 'inactive':
+			return 'inactive'
+		case undefined:
+			return undefined
+		default:
+			return 'other'
 	}
 }
 
