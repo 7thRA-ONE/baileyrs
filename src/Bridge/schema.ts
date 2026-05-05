@@ -248,9 +248,11 @@ const ADAPTERS = {
 		// Top-level metadata overlay wins over the proto's own `syncType` /
 		// `progress` fields when both present — the bridge maintains the
 		// authoritative copy across multi-chunk arrivals.
-		const metaSyncType = asNumber((data as Record<string, unknown>).syncType)
-		const metaChunkOrder = asNumber((data as Record<string, unknown>).chunkOrder)
-		const metaProgress = asNumber((data as Record<string, unknown>).progress)
+		const overlay = data as Record<string, unknown>
+		const metaSyncType = asNumber(overlay.syncType)
+		const metaChunkOrder = asNumber(overlay.chunkOrder)
+		const metaProgress = asNumber(overlay.progress)
+		const peerDataRequestSessionId = asString(overlay.peerDataRequestSessionId)
 		return {
 			type: 'historySync',
 			chats: processed.chats,
@@ -259,11 +261,8 @@ const ADAPTERS = {
 			lidPnMappings: processed.lidPnMappings,
 			syncType: metaSyncType ?? processed.syncType,
 			progress: metaProgress ?? processed.progress,
-			chunkOrder: metaChunkOrder
-			// peerDataRequestSessionId is not in the bridge payload today —
-			// upstream sources it from the `historySyncNotification` of the
-			// triggering protocolMessage, which we don't see here. Bridge
-			// could surface it on the event; tracked for a follow-up.
+			chunkOrder: metaChunkOrder,
+			peerDataRequestSessionId
 		}
 	},
 

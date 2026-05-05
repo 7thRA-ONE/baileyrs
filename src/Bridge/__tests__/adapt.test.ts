@@ -381,8 +381,19 @@ describe('adaptBridgeEvent — anti-corruption layer', () => {
 				lidPnMappings: [],
 				syncType: undefined,
 				progress: undefined,
-				chunkOrder: undefined
+				chunkOrder: undefined,
+				peerDataRequestSessionId: undefined
 			})
+		})
+
+		it('history_sync propagates peerDataRequestSessionId from bridge overlay', () => {
+			const result = adaptBridgeEvent({
+				type: 'history_sync',
+				data: { peerDataRequestSessionId: 'PDO-XYZ', syncType: 4 }
+			} as never)
+			if (result?.type !== 'historySync') throw new Error('narrowing')
+			expect(result.peerDataRequestSessionId).toBe('PDO-XYZ')
+			expect(result.syncType).toBe(4)
 		})
 
 		it('raw_node passes through with tag/attrs', () => {
