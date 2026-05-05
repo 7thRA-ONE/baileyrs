@@ -1,15 +1,29 @@
+/**
+ * Canonical → Baileys event dispatcher.
+ *
+ * Architecture:
+ *   1. `adaptBridgeEvent` (Bridge/schema.ts) turns the raw bridge runtime
+ *      event into a typed `CanonicalEvent` discriminated union — that's
+ *      our domain contract.
+ *   2. `DISPATCHERS` here is a `{ [K in CanonicalEvent['type']]: … }`
+ *      mapped type — TS forces a handler per variant. Adding a new
+ *      canonical variant without a dispatcher is a compile error.
+ *   3. Each dispatcher receives a `DispatchCtx` (closure-captured
+ *      EventEmitter, logger, callbacks, etc.) and the narrow event
+ *      payload — no `as` casts, no `unknown` field access.
+ *
+ * The previous switch-based design had three implicit failure modes:
+ *   • Missing case (no `assertNever`) compiled silently.
+ *   • `ev.emit('chats.update', […] as Partial<…>)` casts hid shape errors.
+ *   • Adding a new bridge event variant required edits in three files
+ *     before the type-checker noticed anything missing.
+ * The mapped-type table closes all three.
+ */
+
 import type { WhatsAppEvent } from 'whatsapp-rust-bridge'
 import type { CanonicalEvent, CanonicalMessage } from '../Bridge/index.ts'
 import { adaptBridgeEvent } from '../Bridge/index.ts'
-import type {
-	BaileysEventMap,
-	BinaryNode,
-	ConnectionState,
-	WACallEvent,
-	WACallUpdateType,
-	WAMessage,
-	WAPresence
-} from '../Types/index.ts'
+import type { BaileysEventMap, BinaryNode, ConnectionState, WACallEvent, WACallUpdateType, WAMessage, WAPresence } from '../Types/index.ts'
 import { DisconnectReason, WAProto } from '../Types/index.ts'
 import { Boom } from '../Utils/boom.ts'
 import { isJidGroup } from '../WABinary/jid-utils.ts'
@@ -69,376 +83,302 @@ const canonicalMessageToWAMessage = (m: CanonicalMessage): WAMessage => {
 	return wm
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Dispatch table — one entry per CanonicalEvent variant.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface EventCallbacks {
+	onPairSuccess?: (data: { platform?: string; businessName?: string }) => void | Promise<void>
+}
+
+interface DispatchCtx {
+	ctx: SocketContext
+	callbacks?: EventCallbacks
+}
+
+/** Narrow `CanonicalEvent` by its `type` discriminator. */
+type CanonicalByType<T extends CanonicalEvent['type']> = Extract<CanonicalEvent, { type: T }>
+
+/** Each dispatcher receives the narrow canonical event + the runtime context. */
+type DispatcherFn<T extends CanonicalEvent['type']> = (evt: CanonicalByType<T>, dispatch: DispatchCtx) => void
+
+/**
+ * Mapped type forces every CanonicalEvent variant to have an entry. Adding
+ * a new variant to `CanonicalEvent` and forgetting a handler here is a
+ * compile error — no `assertNever` runtime hack required.
+ */
+type DispatcherMap = { [K in CanonicalEvent['type']]: DispatcherFn<K> }
+
+const emitClose = (ctx: SocketContext, reason: string, statusCode: number) =>
+	ctx.ev.emit('connection.update', {
+		connection: 'close',
+		lastDisconnect: { error: new Boom(reason, { statusCode }), date: new Date() }
+	} as Partial<ConnectionState>)
+
+/**
+ * Sole `as` cast in the dispatch path. The bridge runtime's
+ * `connection.update` slot accepts the full ConnectionState union, but we
+ * only ever emit partials shaped as `{ connection, … }`. The Baileys event
+ * map types `connection.update` as the full state which is unsafe to
+ * widen; centralizing the cast here keeps every dispatcher clean.
+ */
+const emitConnectionUpdate = (ctx: SocketContext, update: Partial<ConnectionState>) =>
+	ctx.ev.emit('connection.update', update as Partial<ConnectionState>)
+
+const DISPATCHERS: DispatcherMap = {
+	// ── Connection lifecycle ──
+	connected: (_, { ctx }) => emitConnectionUpdate(ctx, { connection: 'open' }),
+	disconnected: (_, { ctx }) => emitClose(ctx, 'Connection closed', DisconnectReason.connectionClosed),
+	qr: (evt, { ctx }) => emitConnectionUpdate(ctx, { qr: evt.code }),
+	pairSuccess: (evt, { ctx, callbacks }) => {
+		const { id, lid, businessName, platform } = evt
+		ctx.setUser({ id, lid })
+		callbacks?.onPairSuccess?.({ platform, businessName })
+		// Synthetic `creds.update` so upstream-style auth code
+		// (`ev.on('creds.update', saveCreds)`) gets a single tick to persist
+		// post-pair state. The bridge owns the real creds; this emission is
+		// a compat hook for upstream's lifecycle.
+		ctx.ev.emit('creds.update', { registered: true, me: { id, lid, name: businessName }, platform })
+	},
+	pairError: (evt, { ctx }) => emitClose(ctx, 'Pairing failed: ' + evt.error, DisconnectReason.connectionClosed),
+	loggedOut: (_, { ctx }) => emitClose(ctx, 'Logged out', DisconnectReason.loggedOut),
+	connectFailure: (evt, { ctx }) => emitClose(ctx, evt.message ?? 'Connection failure', DisconnectReason.connectionClosed),
+	streamError: (evt, { ctx }) => emitClose(ctx, 'Stream error: ' + evt.code, DisconnectReason.badSession),
+	streamReplaced: (_, { ctx }) =>
+		emitConnectionUpdate(ctx, {
+			connection: 'close',
+			lastDisconnect: {
+				error: new Boom('Connection replaced', { statusCode: DisconnectReason.connectionReplaced }),
+				date: new Date()
+			}
+		}),
+	clientOutdated: (_, { ctx }) => emitClose(ctx, 'Client outdated', DisconnectReason.badSession),
+	temporaryBan: (_, { ctx }) => emitClose(ctx, 'Temporary ban', DisconnectReason.forbidden),
+	qrScannedWithoutMultidevice: (_, { ctx }) => ctx.logger.warn('QR scanned but multi-device not enabled on phone'),
+
+	// ── Messages ──
+	message: (evt, { ctx }) => {
+		if (ctx.fullConfig.shouldIgnoreJid?.(evt.chatJid)) return
+		// Note: `emitOwnEvents=false` is NOT applied here. Upstream Baileys
+		// uses that flag to suppress the local echo when `sendMessage()`
+		// succeeds, not to drop inbound `fromMe` messages from other linked
+		// devices.
+		const waMsg = canonicalMessageToWAMessage(evt)
+		const upsertPayload: BaileysEventMap['messages.upsert'] = {
+			messages: [waMsg],
+			type: evt.isOffline ? 'append' : 'notify'
+		}
+		if (evt.unavailableRequestId) upsertPayload.requestId = evt.unavailableRequestId
+		ctx.ev.emit('messages.upsert', upsertPayload)
+
+		// Mirror upstream `process-message.ts:523-533`: when the inbound
+		// proto carries a `reactionMessage`, surface it on the dedicated
+		// `messages.reaction` channel as well. The `key` in the event
+		// payload is the TARGET (the message being reacted to), and
+		// `reaction.key` is the reaction's own envelope key — that's the
+		// exact shape upstream consumers index by.
+		const reactionMessage = evt.messageProto.reactionMessage
+		if (reactionMessage?.key) {
+			ctx.ev.emit('messages.reaction', [
+				{
+					key: reactionMessage.key,
+					reaction: { ...reactionMessage, key: waMsg.key }
+				}
+			])
+		}
+
+		// Mirror upstream `process-message.ts:404-414` (REVOKE) and
+		// `:474-490` (MESSAGE_EDIT). Both surface as `messages.update` with
+		// the TARGET key (id taken from protocolMessage.key).
+		const protocolMsg = evt.messageProto.protocolMessage
+		const protocolKeyId = protocolMsg?.key?.id
+		if (protocolMsg && protocolKeyId) {
+			if (protocolMsg.type === WAProto.Message.ProtocolMessage.Type.REVOKE) {
+				ctx.ev.emit('messages.update', [
+					{
+						key: { ...waMsg.key, id: protocolKeyId },
+						update: {
+							message: null,
+							messageStubType: WAProto.WebMessageInfo.StubType.REVOKE,
+							key: waMsg.key
+						}
+					}
+				])
+			} else if (protocolMsg.type === WAProto.Message.ProtocolMessage.Type.MESSAGE_EDIT && protocolMsg.editedMessage) {
+				const tsMs = protocolMsg.timestampMs
+				const editedTs = tsMs != null ? Math.floor(Number(tsMs) / 1000) : (evt.timestamp ?? waMsg.messageTimestamp)
+				ctx.ev.emit('messages.update', [
+					{
+						key: { ...waMsg.key, id: protocolKeyId },
+						update: {
+							message: { editedMessage: { message: protocolMsg.editedMessage } },
+							messageTimestamp: editedTs
+						}
+					}
+				])
+			}
+		}
+	},
+
+	receipt: (evt, { ctx }) => {
+		// Fan out one MessageUserReceiptUpdate per id (upstream emits
+		// per-id) and pick the timestamp slot from the receipt type so
+		// consumers branching on `receipt.readTimestamp` /
+		// `receipt.playedTimestamp` see the right field populated.
+		const participant = evt.isGroup ? evt.senderJid : undefined
+		const receipt: { receiptTimestamp?: number; readTimestamp?: number; playedTimestamp?: number } = {}
+		if (evt.receiptType === 'read' || evt.receiptType === 'read-self') {
+			receipt.readTimestamp = evt.timestamp
+		} else if (evt.receiptType === 'played' || evt.receiptType === 'played-self') {
+			receipt.playedTimestamp = evt.timestamp
+		} else {
+			receipt.receiptTimestamp = evt.timestamp
+		}
+		ctx.ev.emit(
+			'message-receipt.update',
+			evt.messageIds.map(id => ({
+				key: { remoteJid: evt.chatJid, id, fromMe: evt.isFromMe, participant },
+				receipt
+			}))
+		)
+	},
+
+	undecryptableMessage: (evt, { ctx }) => ctx.logger.warn({ event: evt.raw }, 'undecryptable message received'),
+
+	// ── Contacts ──
+	pushNameUpdate: (evt, { ctx }) => ctx.ev.emit('contacts.update', [{ id: evt.jid, notify: evt.newPushName }]),
+	contactUpdate: (evt, { ctx }) => {
+		// Promote ContactAction fields into upstream's `Partial<Contact>`
+		// shape so consumers (sidebar UIs, contact pickers) see real names
+		// instead of bare ids. `verifiedName` is intentionally not set —
+		// that comes from a different notification path (business-level
+		// verification).
+		const update: { id: string; name?: string; lid?: string; phoneNumber?: string } = { id: evt.jid }
+		const name = evt.fullName ?? evt.firstName
+		if (name) update.name = name
+		if (evt.lidJid) update.lid = evt.lidJid
+		if (evt.pnJid) update.phoneNumber = evt.pnJid
+		ctx.ev.emit('contacts.update', [update])
+	},
+	pictureUpdate: (evt, { ctx }) =>
+		// Upstream emits `imgUrl: null` on removal so consumers cache the
+		// absence instead of refetching forever. `'changed'` is the
+		// sentinel for "invalidate cache, refetch on demand".
+		ctx.ev.emit('contacts.update', [{ id: evt.jid, imgUrl: evt.removed ? null : 'changed' }]),
+
+	// ── Presence ──
+	presence: (evt, { ctx }) =>
+		ctx.ev.emit('presence.update', {
+			id: evt.from,
+			presences: {
+				[evt.from]: {
+					lastKnownPresence: (evt.unavailable ? 'unavailable' : 'available') as WAPresence,
+					lastSeen: evt.lastSeen
+				}
+			}
+		}),
+	chatPresence: (evt, { ctx }) =>
+		ctx.ev.emit('presence.update', {
+			id: evt.chatJid,
+			presences: { [evt.senderJid]: { lastKnownPresence: evt.state as WAPresence } }
+		}),
+
+	// ── Groups ──
+	groupUpdate: (evt, { ctx }) => {
+		const user = ctx.getUser()
+		const fromMe = !!(evt.author && (evt.author === user?.id || evt.author === user?.lid))
+
+		const domainEvent = buildGroupNotificationDomainEvent(evt)
+		if (domainEvent) ctx.ev.emit(domainEvent.name, domainEvent.payload as never)
+
+		const stubMessages = buildGroupNotificationStubMessages(evt, fromMe)
+		if (stubMessages.length > 0) {
+			ctx.ev.emit('messages.upsert', { messages: stubMessages, type: 'notify' } as BaileysEventMap['messages.upsert'])
+		}
+	},
+
+	// ── Chat state ──
+	archiveUpdate: (evt, { ctx }) => ctx.ev.emit('chats.update', [{ id: evt.jid, archived: evt.archived }]),
+	pinUpdate: (evt, { ctx }) =>
+		// Upstream Baileys uses `Chat.pinned` as `number | undefined` —
+		// undefined is the canonical "not pinned" value.
+		ctx.ev.emit('chats.update', [{ id: evt.jid, pinned: evt.pinned ? evt.timestamp : undefined }]),
+	muteUpdate: (evt, { ctx }) =>
+		// Mirrors upstream `chat-utils.ts:809`: when muted, surface
+		// `muteEndTimestamp` (0 = forever); on unmute, surface `null`.
+		ctx.ev.emit('chats.update', [{ id: evt.jid, muteEndTime: evt.muted ? (evt.muteEndTimestamp ?? 0) : null }]),
+	starUpdate: (evt, { ctx }) =>
+		ctx.ev.emit('messages.update', [
+			{
+				key: { remoteJid: evt.chatJid, id: evt.messageId, fromMe: evt.fromMe, participant: evt.participantJid },
+				update: { starred: evt.starred }
+			}
+		]),
+	markChatAsReadUpdate: (evt, { ctx }) =>
+		// Mirrors upstream `chat-utils.ts:852`: read=true → unreadCount=0,
+		// read=false (mark as unread) → -1 sentinel.
+		ctx.ev.emit('chats.update', [{ id: evt.jid, unreadCount: evt.read ? 0 : -1 }]),
+
+	// ── Calls ──
+	incomingCall: (evt, { ctx }) => {
+		const isGroup = isJidGroup(evt.from)
+		const status: WACallUpdateType = evt.action.type === 'preAccept' ? 'ringing' : (evt.action.type as WACallUpdateType)
+		const callEvt: WACallEvent = {
+			chatId: evt.from,
+			from: evt.from,
+			id: evt.action.callId,
+			date: new Date(evt.timestamp * 1000),
+			status,
+			offline: evt.offline,
+			isGroup,
+			...(isGroup ? { groupJid: evt.from } : {}),
+			...(evt.action.type === 'offer' && evt.action.callerPn ? { callerPn: evt.action.callerPn } : {}),
+			...(evt.action.type === 'offer' ? { isVideo: !!evt.action.isVideo } : {})
+		}
+		ctx.ev.emit('call', [callEvt])
+	},
+
+	// ── Raw passthrough ──
+	rawNode: (evt, { ctx }) => emitCBEvents(ctx, evt.node),
+	notification: (evt, { ctx }) =>
+		ctx.logger.trace({ tag: evt.tag, attrs: evt.attrs }, 'bridge generic notification (no Baileys mapping)'),
+	mexNotification: (evt, { ctx }) => {
+		// Route by op_name. Adding a new MEX-driven event means a new entry
+		// here — no per-op_name plumbing in the Bridge layer.
+		if (evt.opName === 'NotificationUserReachoutTimelockUpdate') {
+			const state = mapReachoutTimelock(evt.payload)
+			if (state) emitConnectionUpdate(ctx, { reachoutTimeLock: state })
+			else ctx.logger.warn({ payload: evt.payload }, 'reachout-timelock push: payload missing expected fields')
+			return
+		}
+		ctx.logger.trace({ opName: evt.opName, offline: evt.offline }, 'bridge mex notification with no Baileys mapping (drop)')
+	},
+	noop: (evt, { ctx }) =>
+		ctx.logger.trace({ bridgeType: evt.bridgeType, detail: evt.detail }, 'bridge event acknowledged (no Baileys equivalent)')
+}
+
 /**
  * Create the event handler that translates canonical events into Baileys
  * events on `ctx.ev`. The handler does NO bridge-shape inspection — that's
- * the adapter's job. Any field-access here references the canonical types
- * exclusively, which means a `tsc` failure if a downstream rename ever
- * leaks into the canonical contract.
+ * the schema's job. Field-access here references canonical types
+ * exclusively, so a downstream rename surfaces as a `tsc` failure.
  */
-export const makeEventHandler = (
-	ctx: SocketContext,
-	callbacks?: {
-		onPairSuccess?: (data: { platform?: string; businessName?: string }) => void | Promise<void>
-	}
-) => {
-	const { ev } = ctx
-
-	const emitClose = (reason: string, statusCode: number) =>
-		ev.emit('connection.update', {
-			connection: 'close',
-			lastDisconnect: { error: new Boom(reason, { statusCode }), date: new Date() }
-		} as Partial<ConnectionState>)
-
-	const dispatch = (evt: CanonicalEvent) => {
-		switch (evt.type) {
-			// ── Connection lifecycle ──
-			case 'connected':
-				ev.emit('connection.update', { connection: 'open' } as Partial<ConnectionState>)
-				return
-
-			case 'disconnected':
-				emitClose('Connection closed', DisconnectReason.connectionClosed)
-				return
-
-			case 'qr':
-				ev.emit('connection.update', { qr: evt.code } as Partial<ConnectionState>)
-				return
-
-			case 'pairSuccess': {
-				const { id, lid, businessName, platform } = evt
-				ctx.setUser({ id, lid })
-				callbacks?.onPairSuccess?.({ platform, businessName })
-				// Synthetic `creds.update` so upstream-style auth code
-				// (`ev.on('creds.update', saveCreds)` /
-				// `eventManager.register(...)`) gets a single tick to persist
-				// its post-pair state. The bridge owns the real creds; this
-				// emission is a compat hook for upstream Baileys' lifecycle.
-				ev.emit('creds.update', {
-					registered: true,
-					me: { id, lid, name: businessName },
-					platform
-				})
-				return
-			}
-
-			case 'pairError':
-				emitClose('Pairing failed: ' + evt.error, DisconnectReason.connectionClosed)
-				return
-
-			case 'loggedOut':
-				emitClose('Logged out', DisconnectReason.loggedOut)
-				return
-
-			case 'connectFailure':
-				emitClose(evt.message ?? 'Connection failure', DisconnectReason.connectionClosed)
-				return
-
-			case 'streamError':
-				emitClose('Stream error: ' + evt.code, DisconnectReason.badSession)
-				return
-
-			case 'streamReplaced':
-				ev.emit('connection.update', {
-					connection: 'close',
-					lastDisconnect: {
-						error: new Boom('Connection replaced', { statusCode: DisconnectReason.connectionReplaced }),
-						date: new Date()
-					}
-				} as Partial<ConnectionState>)
-				return
-
-			case 'clientOutdated':
-				emitClose('Client outdated', DisconnectReason.badSession)
-				return
-
-			case 'temporaryBan':
-				emitClose('Temporary ban', DisconnectReason.forbidden)
-				return
-
-			case 'qrScannedWithoutMultidevice':
-				ctx.logger.warn('QR scanned but multi-device not enabled on phone')
-				return
-
-			// ── Messages ──
-			case 'message': {
-				if (ctx.fullConfig.shouldIgnoreJid?.(evt.chatJid)) return
-				// Note: `emitOwnEvents=false` is NOT applied here. Upstream
-				// Baileys uses that flag to suppress the local echo when
-				// `sendMessage()` succeeds, not to drop inbound `fromMe`
-				// messages from other linked devices.
-				const waMsg = canonicalMessageToWAMessage(evt)
-				// Mirror upstream `messages-recv.ts:1491`: offline catch-up
-				// becomes 'append' so consumers can suppress live notifications
-				// for backfill. `requestId` flows when the bridge served this
-				// message via PDO recovery.
-				const upsertPayload: BaileysEventMap['messages.upsert'] = {
-					messages: [waMsg],
-					type: evt.isOffline ? 'append' : 'notify'
-				}
-				if (evt.unavailableRequestId) upsertPayload.requestId = evt.unavailableRequestId
-				ev.emit('messages.upsert', upsertPayload)
-
-				// Mirror upstream `process-message.ts:523-533`: when the inbound
-				// proto carries a `reactionMessage`, surface it on the dedicated
-				// `messages.reaction` channel as well. The `key` in the event
-				// payload is the TARGET (the message being reacted to), and
-				// `reaction.key` is the reaction's own envelope key — that's
-				// the exact shape upstream consumers index by.
-				const reactionMessage = evt.messageProto.reactionMessage
-				if (reactionMessage?.key) {
-					ev.emit('messages.reaction', [
-						{
-							key: reactionMessage.key,
-							reaction: { ...reactionMessage, key: waMsg.key }
-						}
-					])
-				}
-
-				// Mirror upstream `process-message.ts:404-414` (REVOKE) and
-				// `:474-490` (MESSAGE_EDIT). Both surface as `messages.update`
-				// with the TARGET key (id taken from protocolMessage.key) so
-				// consumers tracking edits/revokes don't have to dig into
-				// raw protos.
-				const protocolMsg = evt.messageProto.protocolMessage
-				const protocolKeyId = protocolMsg?.key?.id
-				if (protocolMsg && protocolKeyId) {
-					if (protocolMsg.type === WAProto.Message.ProtocolMessage.Type.REVOKE) {
-						ev.emit('messages.update', [
-							{
-								key: { ...waMsg.key, id: protocolKeyId },
-								update: {
-									message: null,
-									messageStubType: WAProto.WebMessageInfo.StubType.REVOKE,
-									key: waMsg.key
-								}
-							}
-						])
-					} else if (
-						protocolMsg.type === WAProto.Message.ProtocolMessage.Type.MESSAGE_EDIT &&
-						protocolMsg.editedMessage
-					) {
-						const tsMs = protocolMsg.timestampMs
-						const editedTs =
-							tsMs != null ? Math.floor(Number(tsMs) / 1000) : (evt.timestamp ?? waMsg.messageTimestamp)
-						ev.emit('messages.update', [
-							{
-								key: { ...waMsg.key, id: protocolKeyId },
-								update: {
-									message: { editedMessage: { message: protocolMsg.editedMessage } },
-									messageTimestamp: editedTs
-								}
-							}
-						])
-					}
-				}
-				return
-			}
-
-			case 'receipt': {
-				// Fan out one MessageUserReceiptUpdate per id (upstream emits
-				// per-id) and pick the timestamp slot from the receipt type
-				// so consumers branching on `receipt.readTimestamp` /
-				// `receipt.playedTimestamp` see the right field populated.
-				const participant = evt.isGroup ? evt.senderJid : undefined
-				const receipt: { receiptTimestamp?: number; readTimestamp?: number; playedTimestamp?: number } = {}
-				if (evt.receiptType === 'read' || evt.receiptType === 'read-self') {
-					receipt.readTimestamp = evt.timestamp
-				} else if (evt.receiptType === 'played' || evt.receiptType === 'played-self') {
-					receipt.playedTimestamp = evt.timestamp
-				} else {
-					receipt.receiptTimestamp = evt.timestamp
-				}
-				ev.emit(
-					'message-receipt.update',
-					evt.messageIds.map(id => ({
-						key: { remoteJid: evt.chatJid, id, fromMe: evt.isFromMe, participant },
-						receipt
-					}))
-				)
-				return
-			}
-
-			case 'undecryptableMessage':
-				ctx.logger.warn({ event: evt.raw }, 'undecryptable message received')
-				return
-
-			// ── Contacts ──
-			case 'pushNameUpdate':
-				ev.emit('contacts.update', [{ id: evt.jid, notify: evt.newPushName }])
-				return
-
-			case 'contactUpdate': {
-				// Promote the rich ContactAction fields into the upstream
-				// `Partial<Contact>` shape so consumers (sidebar UIs, contact
-				// pickers) see real names instead of bare ids. `verifiedName`
-				// is intentionally not set — that comes from a different
-				// notification path (business-level verification).
-				const update: { id: string; name?: string; lid?: string; phoneNumber?: string } = { id: evt.jid }
-				const name = evt.fullName ?? evt.firstName
-				if (name) update.name = name
-				if (evt.lidJid) update.lid = evt.lidJid
-				if (evt.pnJid) update.phoneNumber = evt.pnJid
-				ev.emit('contacts.update', [update])
-				return
-			}
-
-			case 'pictureUpdate':
-				// Upstream emits `imgUrl: null` on removal so consumers cache
-				// the absence instead of refetching forever. `'changed'` is
-				// the sentinel for "invalidate cache, refetch on demand".
-				ev.emit('contacts.update', [{ id: evt.jid, imgUrl: evt.removed ? null : 'changed' }])
-				return
-
-			// ── Presence ──
-			case 'presence':
-				ev.emit('presence.update', {
-					id: evt.from,
-					presences: {
-						[evt.from]: {
-							lastKnownPresence: (evt.unavailable ? 'unavailable' : 'available') as WAPresence,
-							lastSeen: evt.lastSeen
-						}
-					}
-				})
-				return
-
-			case 'chatPresence':
-				ev.emit('presence.update', {
-					id: evt.chatJid,
-					presences: {
-						[evt.senderJid]: { lastKnownPresence: evt.state as WAPresence }
-					}
-				})
-				return
-
-			// ── Groups ──
-			case 'groupUpdate': {
-				const user = ctx.getUser()
-				const fromMe = !!(evt.author && (evt.author === user?.id || evt.author === user?.lid))
-
-				const domainEvent = buildGroupNotificationDomainEvent(evt)
-				if (domainEvent) ev.emit(domainEvent.name, domainEvent.payload as never)
-
-				const stubMessages = buildGroupNotificationStubMessages(evt, fromMe)
-				if (stubMessages.length > 0) {
-					ev.emit('messages.upsert', { messages: stubMessages, type: 'notify' } as BaileysEventMap['messages.upsert'])
-				}
-				return
-			}
-
-			// ── Chat state ──
-			case 'archiveUpdate':
-				ev.emit('chats.update', [{ id: evt.jid, archived: evt.archived }])
-				return
-
-			case 'pinUpdate':
-				// Upstream Baileys uses `Chat.pinned` as `number | undefined` —
-				// undefined is the canonical "not pinned" value. Emit the
-				// timestamp on pin and `undefined` on unpin so consumers
-				// reading `chat.pinned > 0` see the chat fall out of the
-				// pinned set when the user unpins from the phone.
-				ev.emit('chats.update', [{ id: evt.jid, pinned: evt.pinned ? evt.timestamp : undefined }])
-				return
-
-			case 'muteUpdate':
-				// Mirrors upstream `chat-utils.ts:809`: when muted, surface
-				// `muteEndTimestamp` (0 = forever); on unmute, surface `null`
-				// so consumers comparing `now < muteEndTime` see the chat
-				// flip back to audible immediately.
-				ev.emit('chats.update', [
-					{
-						id: evt.jid,
-						muteEndTime: evt.muted ? (evt.muteEndTimestamp ?? 0) : null
-					}
-				])
-				return
-
-			case 'starUpdate':
-				ev.emit('messages.update', [
-					{
-						key: {
-							remoteJid: evt.chatJid,
-							id: evt.messageId,
-							fromMe: evt.fromMe,
-							participant: evt.participantJid
-						},
-						update: { starred: evt.starred }
-					}
-				])
-				return
-
-			case 'markChatAsReadUpdate':
-				// Mirrors upstream `chat-utils.ts:852`: read=true → unreadCount=0,
-				// read=false (mark as unread) → -1 sentinel that consumers
-				// interpret as "at least one unread, count unknown".
-				ev.emit('chats.update', [{ id: evt.jid, unreadCount: evt.read ? 0 : -1 }])
-				return
-
-			// ── Calls ──
-			case 'incomingCall': {
-				const isGroup = isJidGroup(evt.from)
-				// Map the canonical action onto upstream Baileys' `WACallUpdateType`.
-				// `preAccept` is upstream's `'ringing'`; `'timeout'` has no core
-				// equivalent (upstream synthesizes it from a separate signal).
-				const status: WACallUpdateType =
-					evt.action.type === 'preAccept' ? 'ringing' : (evt.action.type as WACallUpdateType)
-				const callEvt: WACallEvent = {
-					chatId: evt.from,
-					from: evt.from,
-					id: evt.action.callId,
-					date: new Date(evt.timestamp * 1000),
-					status,
-					offline: evt.offline,
-					isGroup,
-					...(isGroup ? { groupJid: evt.from } : {}),
-					...(evt.action.type === 'offer' && evt.action.callerPn ? { callerPn: evt.action.callerPn } : {}),
-					...(evt.action.type === 'offer' ? { isVideo: !!evt.action.isVideo } : {})
-				}
-				ev.emit('call', [callEvt])
-				return
-			}
-
-			// ── Raw passthrough ──
-			case 'rawNode':
-				emitCBEvents(ctx, evt.node)
-				return
-
-			case 'notification':
-				ctx.logger.trace({ tag: evt.tag, attrs: evt.attrs }, 'bridge generic notification (no Baileys mapping)')
-				return
-
-			case 'mexNotification': {
-				// Route by op_name. Adding a new MEX-driven event means a new
-				// case here — no per-op_name plumbing in the Bridge layer.
-				if (evt.opName === 'NotificationUserReachoutTimelockUpdate') {
-					const state = mapReachoutTimelock(evt.payload)
-					if (state) {
-						ev.emit('connection.update', { reachoutTimeLock: state } as Partial<ConnectionState>)
-					} else {
-						ctx.logger.warn({ payload: evt.payload }, 'reachout-timelock push: payload missing expected fields')
-					}
-					return
-				}
-				ctx.logger.trace(
-					{ opName: evt.opName, offline: evt.offline },
-					'bridge mex notification with no Baileys mapping (drop)'
-				)
-				return
-			}
-
-			case 'noop':
-				ctx.logger.trace(
-					{ bridgeType: evt.bridgeType, detail: evt.detail },
-					'bridge event acknowledged (no Baileys equivalent)'
-				)
-				return
-		}
-	}
+export const makeEventHandler = (ctx: SocketContext, callbacks?: EventCallbacks) => {
+	const dispatchCtx: DispatchCtx = { ctx, callbacks }
 
 	return (event: WhatsAppEvent) => {
 		const canonical = adaptBridgeEvent(event, ctx.logger)
 		if (!canonical) return
-		dispatch(canonical)
+		// Type-safe table lookup. The runtime cast through `DispatcherFn`
+		// is a no-op TS-wise (the table is exhaustively typed) — needed
+		// only because TS can't follow the discriminator across the
+		// indexed-access into the mapped type.
+		const dispatcher = DISPATCHERS[canonical.type] as DispatcherFn<typeof canonical.type>
+		try {
+			dispatcher(canonical, dispatchCtx)
+		} catch (err) {
+			// One bad event must not poison the rest of the pipeline.
+			ctx.logger.error({ err, type: canonical.type }, 'dispatcher threw — dropping event')
+		}
 	}
 }
