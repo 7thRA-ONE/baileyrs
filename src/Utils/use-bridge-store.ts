@@ -84,11 +84,13 @@ export async function useBridgeStore(folder: string): Promise<NonNullable<Authen
 		}
 	}
 
+	const FLUSH_MAX_PASSES = 32
 	const flushAll = async () => {
 		// Drain in a loop because new sets can land while we're awaiting the
-		// previous batch's writeFile. Without this, callers in shutdown paths
-		// that race with in-flight `set()` calls miss the tail.
-		while (pendingWrites.size > 0) {
+		// previous batch's writeFile. Bounded so a caller emitting writes in
+		// a tight loop can't lock us forever — `Socket/index.ts.end()` waits
+		// on this and must always return.
+		for (let i = 0; i < FLUSH_MAX_PASSES && pendingWrites.size > 0; i++) {
 			const keys = [...pendingWrites.keys()]
 			await Promise.all(keys.map(flushWrite))
 		}
