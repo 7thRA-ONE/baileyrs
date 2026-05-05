@@ -182,7 +182,21 @@ export const adaptBridgeEvent = (event: WhatsAppEvent, logger?: ILogger): Canoni
 		case 'contact_updated': {
 			if (!isObject(data)) return null
 			const jid = asJidString(data.jid)
-			return jid ? { type: 'contactUpdate', jid } : null
+			if (!jid) return null
+			// `contact_updated` is the lightweight server notification
+			// (no action payload). `contact_update` (from app-state sync)
+			// carries the ContactAction proto shape — extract whatever
+			// fields are present.
+			const action = isObject(data.action) ? data.action : undefined
+			return {
+				type: 'contactUpdate',
+				jid,
+				fullName: asString(action?.fullName) ?? asString(action?.full_name),
+				firstName: asString(action?.firstName) ?? asString(action?.first_name),
+				lidJid: asString(action?.lidJid) ?? asString(action?.lid_jid),
+				pnJid: asString(action?.pnJid) ?? asString(action?.pn_jid),
+				username: asString(action?.username)
+			}
 		}
 
 		case 'picture_update': {

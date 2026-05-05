@@ -254,9 +254,20 @@ export const makeEventHandler = (
 				ev.emit('contacts.update', [{ id: evt.jid, notify: evt.newPushName }])
 				return
 
-			case 'contactUpdate':
-				ev.emit('contacts.update', [{ id: evt.jid }])
+			case 'contactUpdate': {
+				// Promote the rich ContactAction fields into the upstream
+				// `Partial<Contact>` shape so consumers (sidebar UIs, contact
+				// pickers) see real names instead of bare ids. `verifiedName`
+				// is intentionally not set — that comes from a different
+				// notification path (business-level verification).
+				const update: { id: string; name?: string; lid?: string; phoneNumber?: string } = { id: evt.jid }
+				const name = evt.fullName ?? evt.firstName
+				if (name) update.name = name
+				if (evt.lidJid) update.lid = evt.lidJid
+				if (evt.pnJid) update.phoneNumber = evt.pnJid
+				ev.emit('contacts.update', [update])
 				return
+			}
 
 			case 'pictureUpdate':
 				// Upstream emits `imgUrl: null` on removal so consumers cache

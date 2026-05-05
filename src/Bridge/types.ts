@@ -129,6 +129,16 @@ export interface CanonicalPushNameUpdate {
 export interface CanonicalContactUpdate {
 	type: 'contactUpdate'
 	jid: string
+	/** ContactAction.fullName — the user-set display name. */
+	fullName?: string
+	/** ContactAction.firstName — separate slot used by some clients. */
+	firstName?: string
+	/** Resolved LID counterpart of `jid` (when `jid` is a PN). */
+	lidJid?: string
+	/** Resolved PN counterpart of `jid` (when `jid` is a LID). */
+	pnJid?: string
+	/** ContactAction.username — meta username if the contact has set one. */
+	username?: string
 }
 
 export interface CanonicalPictureUpdate {
