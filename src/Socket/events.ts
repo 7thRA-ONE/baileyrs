@@ -164,6 +164,22 @@ export const makeEventHandler = (
 				// messages from other linked devices.
 				const waMsg = canonicalMessageToWAMessage(evt)
 				ev.emit('messages.upsert', { messages: [waMsg], type: 'notify' } as BaileysEventMap['messages.upsert'])
+
+				// Mirror upstream `process-message.ts:523-533`: when the inbound
+				// proto carries a `reactionMessage`, surface it on the dedicated
+				// `messages.reaction` channel as well. The `key` in the event
+				// payload is the TARGET (the message being reacted to), and
+				// `reaction.key` is the reaction's own envelope key — that's
+				// the exact shape upstream consumers index by.
+				const reactionMessage = evt.messageProto.reactionMessage
+				if (reactionMessage?.key) {
+					ev.emit('messages.reaction', [
+						{
+							key: reactionMessage.key,
+							reaction: { ...reactionMessage, key: waMsg.key }
+						}
+					])
+				}
 				return
 			}
 
