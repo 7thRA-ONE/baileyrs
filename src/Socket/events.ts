@@ -251,7 +251,16 @@ export const makeEventHandler = (
 				return
 
 			case 'muteUpdate':
-				ev.emit('chats.update', [{ id: evt.jid, muteEndTime: evt.timestamp }])
+				// Mirrors upstream `chat-utils.ts:809`: when muted, surface
+				// `muteEndTimestamp` (0 = forever); on unmute, surface `null`
+				// so consumers comparing `now < muteEndTime` see the chat
+				// flip back to audible immediately.
+				ev.emit('chats.update', [
+					{
+						id: evt.jid,
+						muteEndTime: evt.muted ? (evt.muteEndTimestamp ?? 0) : null
+					}
+				])
 				return
 
 			case 'starUpdate':

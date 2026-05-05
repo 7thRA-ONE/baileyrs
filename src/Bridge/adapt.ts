@@ -240,7 +240,23 @@ export const adaptBridgeEvent = (event: WhatsAppEvent, logger?: ILogger): Canoni
 		case 'mute_update': {
 			if (!isObject(data)) return null
 			const jid = asJidString(data.jid)
-			return jid ? { type: 'muteUpdate', jid, timestamp: asNumber(data.timestamp) } : null
+			if (!jid) return null
+			const action = isObject(data.action) ? data.action : undefined
+			// Default to `true` for legacy bridge payloads where only mute
+			// fired through this path. The bridge today carries the
+			// MuteAction proto's `muted` bool; unmute lands as `false`.
+			const muted = asBoolOr(action?.muted, true)
+			// muteEndTimestamp from the proto is camelCase. Bridge serde keeps
+			// the field name; check both spellings for safety against any
+			// future snake_case normalization.
+			const muteEndTimestamp = asNumber(action?.muteEndTimestamp) ?? asNumber(action?.mute_end_timestamp)
+			return {
+				type: 'muteUpdate',
+				jid,
+				timestamp: asNumber(data.timestamp),
+				muted,
+				muteEndTimestamp
+			}
 		}
 
 		case 'star_update':

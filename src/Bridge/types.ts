@@ -208,7 +208,16 @@ export interface CanonicalPinUpdate {
 export interface CanonicalMuteUpdate {
 	type: 'muteUpdate'
 	jid: string
+	/** Notification timestamp (when the mute action was synced). */
 	timestamp?: number
+	/** `false` when the user unmuted. Drives `chats.update.muteEndTime: null`. */
+	muted: boolean
+	/**
+	 * Unix-seconds the mute should expire at. Absent for unmute and for
+	 * indefinite mute. WhatsApp uses 0 as the "muted forever" sentinel —
+	 * preserved as 0 so consumers can branch on it.
+	 */
+	muteEndTimestamp?: number
 }
 
 export interface CanonicalStarUpdate {
