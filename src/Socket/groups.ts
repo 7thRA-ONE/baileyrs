@@ -2,6 +2,28 @@ import type { GroupMetadataResult } from 'whatsapp-rust-bridge'
 import type { GroupMetadata } from '../Types/index.ts'
 import type { SocketContext } from './types.ts'
 
+/**
+ * Aliases accepted by upstream Baileys' single-arg `groupSettingUpdate(jid, verb)`.
+ * Each alias resolves to a `(setting, value)` pair the bridge expects.
+ */
+type GroupSettingArg =
+	| 'locked'
+	| 'announce'
+	| 'membership_approval'
+	| 'announcement'
+	| 'not_announcement'
+	| 'unlocked'
+	| 'on'
+	| 'off'
+type GroupSettingResolved = { setting: 'locked' | 'announce' | 'membership_approval'; value: boolean }
+const GROUP_SETTING_ALIASES: Partial<Record<GroupSettingArg, GroupSettingResolved>> = {
+	announcement: { setting: 'announce', value: true },
+	not_announcement: { setting: 'announce', value: false },
+	unlocked: { setting: 'locked', value: false },
+	on: { setting: 'locked', value: true },
+	off: { setting: 'locked', value: false }
+}
+
 /** Convert bridge GroupMetadataResult to Baileys GroupMetadata */
 function bridgeGroupToMetadata(g: GroupMetadataResult): GroupMetadata {
 	return {
@@ -84,51 +106,16 @@ export const makeGroupMethods = (ctx: SocketContext) => ({
 		return await (await ctx.getClient()).groupRevokeInvite(jid)
 	},
 
-	groupSettingUpdate: async (
-		jid: string,
-		setting:
-			| 'locked'
-			| 'announce'
-			| 'membership_approval'
-			| 'announcement'
-			| 'not_announcement'
-			| 'unlocked'
-			| 'on'
-			| 'off',
-		value?: boolean
-	) => {
+	groupSettingUpdate: async (jid: string, setting: GroupSettingArg, value?: boolean) => {
 		// Map upstream-Baileys legacy single-arg verbs onto the bridge's
-		// (setting, boolean) contract. Keeps `conn.groupSettingUpdate(jid, 'announcement')`
-		// working without forcing call-site migration.
-		let resolvedSetting: 'locked' | 'announce' | 'membership_approval'
-		let resolvedValue: boolean
-		switch (setting) {
-			case 'announcement':
-				resolvedSetting = 'announce'
-				resolvedValue = true
-				break
-			case 'not_announcement':
-				resolvedSetting = 'announce'
-				resolvedValue = false
-				break
-			case 'unlocked':
-				resolvedSetting = 'locked'
-				resolvedValue = false
-				break
-			case 'on':
-				resolvedSetting = 'locked'
-				resolvedValue = true
-				break
-			case 'off':
-				resolvedSetting = 'locked'
-				resolvedValue = false
-				break
-			default:
-				resolvedSetting = setting
-				resolvedValue = value ?? false
+		// (setting, boolean) contract via GROUP_SETTING_ALIASES. Native
+		// settings ('locked' / 'announce' / 'membership_approval') fall
+		// through with the caller-supplied `value`.
+		const resolved = GROUP_SETTING_ALIASES[setting] ?? {
+			setting: setting as GroupSettingResolved['setting'],
+			value: value ?? false
 		}
-
-		await (await ctx.getClient()).groupSettingUpdate(jid, resolvedSetting, resolvedValue)
+		await (await ctx.getClient()).groupSettingUpdate(jid, resolved.setting, resolved.value)
 	},
 
 	groupToggleEphemeral: async (jid: string, expiration: number) => {

@@ -63,15 +63,19 @@ type AdapterFn<T extends BridgeEventType> = (data: BridgeData<T>, logger?: ILogg
 /** Mapped type that forces every bridge event variant to have an entry. */
 type AdapterMap = { [K in BridgeEventType]: AdapterFn<K> }
 
+/**
+ * Bridge sync-action events (`pin_update`, `mute_update`, etc.) carry the
+ * proto action under `data.action`, but the bridge `.d.ts` types it as
+ * the unexported `PinAction` / `MuteAction` (resolves to `any`). Narrow
+ * once at the call site.
+ */
+const extractAction = (data: { action?: unknown }): Record<string, unknown> | undefined =>
+	isObject(data.action) ? data.action : undefined
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-event adapters — the bulk of the file. One entry per WhatsAppEvent variant.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Note: bridge action sub-types (PinAction, MuteAction, etc.) are
- * referenced in the .d.ts but not exported, so TS resolves them as `any`.
- * The narrowing helpers below apply runtime validation at those points.
- */
 const ADAPTERS = {
 	// ── Connection lifecycle ──
 	connected: () => ({ type: 'connected' }),
@@ -218,24 +222,22 @@ const ADAPTERS = {
 	archive_update: data => {
 		const jid = asJidString(data.jid)
 		if (!jid) return null
-		const action = isObject(data.action) ? data.action : undefined
-		return { type: 'archiveUpdate', jid, archived: asBoolOr(action?.archived, true) }
+		return { type: 'archiveUpdate', jid, archived: asBoolOr(extractAction(data)?.archived, true) }
 	},
 	pin_update: data => {
 		const jid = asJidString(data.jid)
 		if (!jid) return null
-		const action = isObject(data.action) ? data.action : undefined
 		return {
 			type: 'pinUpdate',
 			jid,
 			timestamp: asNumber(data.timestamp),
-			pinned: asBoolOr(action?.pinned, true)
+			pinned: asBoolOr(extractAction(data)?.pinned, true)
 		}
 	},
 	mute_update: data => {
 		const jid = asJidString(data.jid)
 		if (!jid) return null
-		const action = isObject(data.action) ? data.action : undefined
+		const action = extractAction(data)
 		return {
 			type: 'muteUpdate',
 			jid,
@@ -248,8 +250,7 @@ const ADAPTERS = {
 	mark_chat_as_read_update: data => {
 		const jid = asJidString(data.jid)
 		if (!jid) return null
-		const action = isObject(data.action) ? data.action : undefined
-		return { type: 'markChatAsReadUpdate', jid, read: asBoolOr(action?.read, true) }
+		return { type: 'markChatAsReadUpdate', jid, read: asBoolOr(extractAction(data)?.read, true) }
 	},
 
 	// ── Calls ──
@@ -517,40 +518,26 @@ const adaptContactUpdate = (data: unknown): CanonicalEvent | null => {
 	}
 }
 
+/** Bridge wire `ReceiptType` → canonical kebab-cased variant. */
+const RECEIPT_TYPE_MAP: Record<string, NonNullable<import('./types.ts').CanonicalReceipt['receiptType']>> = {
+	delivered: 'delivered',
+	sender: 'sender',
+	retry: 'retry',
+	enc_rekey_retry: 'enc-rekey-retry',
+	read: 'read',
+	read_self: 'read-self',
+	played: 'played',
+	played_self: 'played-self',
+	inactive: 'inactive',
+	peer_msg: 'peer-msg',
+	history_sync: 'history-sync',
+	server_error: 'server-error'
+}
+
 const parseReceiptType = (raw: unknown): import('./types.ts').CanonicalReceipt['receiptType'] => {
-	let norm: string | undefined
-	if (typeof raw === 'string') norm = raw
-	else if (isObject(raw) && typeof raw.type === 'string') norm = raw.type
-	switch (norm) {
-		case 'delivered':
-			return 'delivered'
-		case 'sender':
-			return 'sender'
-		case 'retry':
-			return 'retry'
-		case 'enc_rekey_retry':
-			return 'enc-rekey-retry'
-		case 'read':
-			return 'read'
-		case 'read_self':
-			return 'read-self'
-		case 'played':
-			return 'played'
-		case 'played_self':
-			return 'played-self'
-		case 'inactive':
-			return 'inactive'
-		case 'peer_msg':
-			return 'peer-msg'
-		case 'history_sync':
-			return 'history-sync'
-		case 'server_error':
-			return 'server-error'
-		case undefined:
-			return undefined
-		default:
-			return 'other'
-	}
+	const norm = typeof raw === 'string' ? raw : isObject(raw) && typeof raw.type === 'string' ? raw.type : undefined
+	if (norm == null) return undefined
+	return RECEIPT_TYPE_MAP[norm] ?? 'other'
 }
 
 const adaptStarUpdate = (data: BridgeData<'star_update'>): CanonicalEvent | null => {

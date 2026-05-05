@@ -201,24 +201,43 @@ interface StubRecipe {
 	idSuffix: string
 }
 
+/**
+ * Toggle-style actions: same stubType for both states, distinguished by
+ * stubParams[0] = 'on' | 'off'. `idSuffix` is shared (counter in the
+ * caller distinguishes individual emits).
+ */
+const TOGGLE_STUBS: Record<string, { stubType: number; on: boolean; idSuffix: string }> = {
+	locked: { stubType: STUB.GROUP_CHANGE_RESTRICT, on: true, idSuffix: 'restrict' },
+	unlocked: { stubType: STUB.GROUP_CHANGE_RESTRICT, on: false, idSuffix: 'restrict' },
+	announce: { stubType: STUB.GROUP_CHANGE_ANNOUNCE, on: true, idSuffix: 'announce' },
+	notAnnounce: { stubType: STUB.GROUP_CHANGE_ANNOUNCE, on: false, idSuffix: 'announce' }
+}
+
+/** Marker actions with no stubParams payload. */
+const SIMPLE_STUBS: Record<string, { stubType: number; idSuffix: string }> = {
+	revokeInvite: { stubType: STUB.GROUP_CHANGE_INVITE_LINK, idSuffix: 'rinv' },
+	create: { stubType: STUB.GROUP_CREATE, idSuffix: 'create' },
+	noFrequentlyForwarded: { stubType: STUB.GROUP_CHANGE_NO_FREQUENTLY_FORWARDED, idSuffix: 'nff' }
+}
+
 const stubRecipesFor = (action: CanonicalGroupAction): StubRecipe[] => {
 	if (isParticipantAction(action)) {
 		const stubType = PARTICIPANT_STUBS[action.type]
 		// Match upstream `messages-recv.ts:714`: each stubParameter is a
-		// `JSON.stringify({ id, phoneNumber? })`. Upstream `process-message.ts`
-		// (`:630, :635, …`) `JSON.parse`s these — bare jids would crash that
-		// path. Keeping the shape compatible lets bots that delegate to
-		// upstream's process-message keep working.
+		// `JSON.stringify({ id, phoneNumber? })` so upstream
+		// `process-message.ts` `JSON.parse`s cleanly.
 		return action.participants.map((p, idx) => {
 			const entry: { id: string; phoneNumber?: string } = { id: p.jid }
 			if (p.phoneNumber) entry.phoneNumber = p.phoneNumber
-			return {
-				stubType,
-				stubParams: [JSON.stringify(entry)],
-				idSuffix: `${idx}-${p.jid.split('@')[0]}`
-			}
+			return { stubType, stubParams: [JSON.stringify(entry)], idSuffix: `${idx}-${p.jid.split('@')[0]}` }
 		})
 	}
+
+	const toggle = TOGGLE_STUBS[action.type]
+	if (toggle) return [{ stubType: toggle.stubType, stubParams: [toggle.on ? 'on' : 'off'], idSuffix: toggle.idSuffix }]
+
+	const simple = SIMPLE_STUBS[action.type]
+	if (simple) return [{ stubType: simple.stubType, stubParams: [], idSuffix: simple.idSuffix }]
 
 	switch (action.type) {
 		case 'subject':
@@ -231,14 +250,6 @@ const stubRecipesFor = (action: CanonicalGroupAction): StubRecipe[] => {
 					idSuffix: 'desc'
 				}
 			]
-		case 'locked':
-			return [{ stubType: STUB.GROUP_CHANGE_RESTRICT, stubParams: ['on'], idSuffix: 'restrict' }]
-		case 'unlocked':
-			return [{ stubType: STUB.GROUP_CHANGE_RESTRICT, stubParams: ['off'], idSuffix: 'restrict' }]
-		case 'announce':
-			return [{ stubType: STUB.GROUP_CHANGE_ANNOUNCE, stubParams: ['on'], idSuffix: 'announce' }]
-		case 'notAnnounce':
-			return [{ stubType: STUB.GROUP_CHANGE_ANNOUNCE, stubParams: ['off'], idSuffix: 'announce' }]
 		case 'membershipApprovalMode':
 			return [
 				{
@@ -249,12 +260,6 @@ const stubRecipesFor = (action: CanonicalGroupAction): StubRecipe[] => {
 			]
 		case 'memberAddMode':
 			return [{ stubType: STUB.GROUP_MEMBER_ADD_MODE, stubParams: [action.mode], idSuffix: 'mam' }]
-		case 'revokeInvite':
-			return [{ stubType: STUB.GROUP_CHANGE_INVITE_LINK, stubParams: [], idSuffix: 'rinv' }]
-		case 'create':
-			return [{ stubType: STUB.GROUP_CREATE, stubParams: [], idSuffix: 'create' }]
-		case 'noFrequentlyForwarded':
-			return [{ stubType: STUB.GROUP_CHANGE_NO_FREQUENTLY_FORWARDED, stubParams: [], idSuffix: 'nff' }]
 		default:
 			return []
 	}
