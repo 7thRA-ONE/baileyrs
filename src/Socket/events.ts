@@ -312,7 +312,34 @@ const DISPATCHERS: DispatcherMap = {
 		)
 	},
 
-	undecryptableMessage: (evt, { ctx }) => ctx.logger.warn({ event: evt.raw }, 'undecryptable message received'),
+	undecryptableMessage: (evt, { ctx }) => {
+		// Mirror upstream `messages-recv.ts:1352-…`: surface a CIPHERTEXT
+		// stub on `messages.upsert` so consumers see the placeholder and
+		// can request a resend (PLACEHOLDER_MESSAGE_RESEND PDO). Logging
+		// happens at debug — upstream considers this routine.
+		ctx.logger.debug(
+			{ id: evt.id, chat: evt.chatJid, isUnavailable: evt.isUnavailable, fail: evt.decryptFailMode },
+			'undecryptable message received'
+		)
+		// `decrypt_fail_mode === 'hide'` means the server told us to
+		// silently drop — match that by NOT emitting an upsert.
+		if (evt.decryptFailMode === 'hide') return
+		const stubMsg = WAProto.WebMessageInfo.fromObject({
+			key: {
+				remoteJid: evt.chatJid,
+				fromMe: evt.isFromMe,
+				id: evt.id,
+				participant: evt.senderJid
+			},
+			messageTimestamp: evt.timestamp,
+			pushName: evt.pushName,
+			messageStubType: WAProto.WebMessageInfo.StubType.CIPHERTEXT,
+			messageStubParameters: evt.unavailableType ? [evt.unavailableType] : []
+		}) as WAMessage
+		if (evt.participantAlt) stubMsg.key.participantAlt = evt.participantAlt
+		if (evt.remoteJidAlt) stubMsg.key.remoteJidAlt = evt.remoteJidAlt
+		ctx.ev.emit('messages.upsert', { messages: [stubMsg], type: 'notify' })
+	},
 
 	// ── Contacts ──
 	pushNameUpdate: (evt, { ctx }) => ctx.ev.emit('contacts.update', [{ id: evt.jid, notify: evt.newPushName }]),

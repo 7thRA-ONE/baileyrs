@@ -116,7 +116,39 @@ const ADAPTERS = {
 	// ── Messages ──
 	message: (data, logger) => adaptMessage(data, logger),
 	receipt: (data, logger) => adaptReceipt(data, logger),
-	undecryptable_message: data => ({ type: 'undecryptableMessage', raw: data }),
+	undecryptable_message: data => {
+		// Bridge ships `{ info: MessageInfo, is_unavailable, unavailable_type,
+		// decrypt_fail_mode }` — same MessageInfo shape as the regular
+		// `message` event. Extract the chat / sender / id so the dispatcher
+		// can synthesize a CIPHERTEXT stub matching upstream
+		// `messages-recv.ts:1352`.
+		if (!isObject(data)) return null
+		const info = isObject(data.info) ? data.info : undefined
+		if (!info) return null
+		const src = isObject(info.source) ? info.source : undefined
+		const chat = src && asJidString(src.chat)
+		const id = asString(info.id)
+		if (!src || !chat || !id) return null
+		const isGroup = asBoolOr(src.is_group, false)
+		const participantAlt = isGroup && isBridgeJid(src.sender_alt) ? bridgeJidToString(src.sender_alt) : undefined
+		const remoteJidAlt = !isGroup && isBridgeJid(src.recipient_alt) ? bridgeJidToString(src.recipient_alt) : undefined
+		return {
+			type: 'undecryptableMessage',
+			chatJid: chat,
+			senderJid: isGroup ? asJidString(src.sender) : undefined,
+			id,
+			timestamp: toUnixSeconds(info.timestamp),
+			isFromMe: asBoolOr(src.is_from_me, false),
+			isGroup,
+			pushName: asString(info.push_name),
+			participantAlt,
+			remoteJidAlt,
+			isUnavailable: asBoolOr(data.is_unavailable, false),
+			unavailableType: asString(data.unavailable_type),
+			decryptFailMode: asString(data.decrypt_fail_mode),
+			raw: data
+		}
+	},
 
 	// ── Contacts ──
 	push_name_update: data => {

@@ -343,6 +343,22 @@ export interface CanonicalIncomingCall {
 
 export interface CanonicalUndecryptableMessage {
 	type: 'undecryptableMessage'
+	chatJid: string
+	senderJid?: string
+	id: string
+	timestamp: number
+	isFromMe: boolean
+	isGroup: boolean
+	pushName?: string
+	participantAlt?: string
+	remoteJidAlt?: string
+	/** Bridge `is_unavailable` flag — true when the message was placeholder-replaced. */
+	isUnavailable: boolean
+	/** Bridge `unavailable_type`: "view_once" | "unknown". */
+	unavailableType?: string
+	/** Bridge `decrypt_fail_mode`: "show" | "hide". */
+	decryptFailMode?: string
+	/** Original raw payload, preserved for debug logging. */
 	raw: unknown
 }
 
