@@ -82,9 +82,10 @@ describe('E2E: Group lifecycle (create → message → promote → demote → ki
 		const charlieStubCreate = waitForMessage(charlie.sock, m => m.messageStubType === WAMessageStubType.GROUP_CREATE)
 
 		const result = await alice.sock.groupCreate(subject, [bob.jid, charlie.jid])
-		expect(result.gid).toBeTruthy()
-		expect(result.gid.endsWith('@g.us')).toBe(true)
-		groupJid = result.gid
+		expect(result.id).toBeTruthy()
+		expect(result.id.endsWith('@g.us')).toBe(true)
+		expect(result.subject).toBe(subject)
+		groupJid = result.id
 
 		const [aliceUpdate, bobUpdate, charlieUpdate] = await Promise.all([
 			aliceGroupsUpdate,

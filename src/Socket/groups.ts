@@ -37,8 +37,18 @@ export const makeGroupMethods = (ctx: SocketContext) => ({
 		return bridgeGroupToMetadata(g)
 	},
 
-	groupCreate: async (subject: string, participants: string[]) => {
-		return await (await ctx.getClient()).createGroup(subject, participants)
+	groupCreate: async (subject: string, participants: string[]): Promise<GroupMetadata> => {
+		// Bridge's `createGroup` returns only `{ gid }`. Upstream Baileys
+		// returns the full GroupMetadata (id/subject/owner/participants[]/…)
+		// after parsing the IQ response. Match that contract by chasing the
+		// metadata once the group exists. Two round-trips total — same as
+		// upstream which extracts metadata from the create response — but
+		// this way we don't depend on the bridge to expose every field on
+		// CreateGroupResult.
+		const client = await ctx.getClient()
+		const { gid } = await client.createGroup(subject, participants)
+		const metadata = await client.getGroupMetadata(gid)
+		return bridgeGroupToMetadata(metadata)
 	},
 
 	groupLeave: async (jid: string) => {

@@ -435,8 +435,8 @@ describe(
 
 			const result = await alice.sock.groupCreate(subject, [bob.jid, charlie.jid])
 			expect(result).toBeDefined()
-			expect(result.gid.endsWith('@g.us')).toBe(true)
-			groupJid = result.gid
+			expect(result.id.endsWith('@g.us')).toBe(true)
+			groupJid = result.id
 
 			const [a, b, c] = await Promise.all([aliceUpdate, bobUpdate, charlieUpdate])
 			expect(a[0]?.id).toBe(groupJid)
