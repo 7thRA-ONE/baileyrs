@@ -419,18 +419,23 @@ const DISPATCHERS: DispatcherMap = {
 		const user = ctx.getUser()
 		const fromMe = !!(evt.author && (evt.author === user?.id || evt.author === user?.lid))
 
+		// Dispatch via discriminator instead of `as never` so TS validates
+		// payload ↔ event-name pairing.
 		const domainEvent = buildGroupNotificationDomainEvent(evt)
-		if (domainEvent) ctx.ev.emit(domainEvent.name, domainEvent.payload as never)
-
-		// `groups.upsert` for group creation. Upstream emits it from
-		// `messages-recv.ts:661` after fetching metadata; here we have only
-		// the `<create>` notification (no metadata payload), so consumers
-		// that need full info should refetch via `groupMetadata`. Emitting
-		// the bare id matches what upstream sends when the metadata fetch
-		// hasn't completed yet — better than silently swallowing the event.
-		if (evt.action.type === 'create') {
-			ctx.ev.emit('groups.upsert', [{ id: evt.groupJid } as never])
+		if (domainEvent) {
+			if (domainEvent.name === 'groups.update') ctx.ev.emit('groups.update', domainEvent.payload)
+			else ctx.ev.emit('group-participants.update', domainEvent.payload)
 		}
+
+		// `groups.upsert` is intentionally NOT emitted from `<create>`. The
+		// bridge gives us only the creation marker — `participants` /
+		// `subject` / `creation` are unknown without an extra IQ. Upstream
+		// emits this only AFTER `groupMetadata` resolves (`messages-recv.ts:661`),
+		// so emitting `[{ id }]` here would feed consumers a broken
+		// `GroupMetadata` (participants undefined → `metadata.participants.map`
+		// throws). Bots that want the metadata should call
+		// `sock.groupMetadata(evt.groupJid)` from a `groups.update` listener
+		// or after the matching `messages.upsert` stub.
 
 		// Fan out `group.join-request` for membership_approval_request /
 		// created_membership_requests / revoked_membership_requests.
