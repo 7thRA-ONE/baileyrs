@@ -205,7 +205,10 @@ export const makeEventHandler = (
 				return
 
 			case 'pictureUpdate':
-				ev.emit('contacts.update', [{ id: evt.jid, imgUrl: 'changed' }])
+				// Upstream emits `imgUrl: null` on removal so consumers cache
+				// the absence instead of refetching forever. `'changed'` is
+				// the sentinel for "invalidate cache, refetch on demand".
+				ev.emit('contacts.update', [{ id: evt.jid, imgUrl: evt.removed ? null : 'changed' }])
 				return
 
 			// ── Presence ──

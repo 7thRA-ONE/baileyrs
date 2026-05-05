@@ -134,6 +134,12 @@ export interface CanonicalContactUpdate {
 export interface CanonicalPictureUpdate {
 	type: 'pictureUpdate'
 	jid: string
+	/** `true` when the user removed the avatar; consumers map this to `imgUrl: null`. */
+	removed: boolean
+	/** Admin who changed the picture (group-only). */
+	author?: string
+	/** Server-assigned picture id; absent on removal. */
+	pictureId?: string
 }
 
 // ── Presence ──

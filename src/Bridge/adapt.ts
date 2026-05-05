@@ -188,7 +188,14 @@ export const adaptBridgeEvent = (event: WhatsAppEvent, logger?: ILogger): Canoni
 		case 'picture_update': {
 			if (!isObject(data)) return null
 			const jid = asJidString(data.jid)
-			return jid ? { type: 'pictureUpdate', jid } : null
+			if (!jid) return null
+			return {
+				type: 'pictureUpdate',
+				jid,
+				removed: asBoolOr(data.removed, false),
+				author: asJidString(data.author),
+				pictureId: asString(data.picture_id)
+			}
 		}
 
 		// ── Presence ──
