@@ -180,6 +180,44 @@ export const makeEventHandler = (
 						}
 					])
 				}
+
+				// Mirror upstream `process-message.ts:404-414` (REVOKE) and
+				// `:474-490` (MESSAGE_EDIT). Both surface as `messages.update`
+				// with the TARGET key (id taken from protocolMessage.key) so
+				// consumers tracking edits/revokes don't have to dig into
+				// raw protos.
+				const protocolMsg = evt.messageProto.protocolMessage
+				const protocolKeyId = protocolMsg?.key?.id
+				if (protocolMsg && protocolKeyId) {
+					if (protocolMsg.type === WAProto.Message.ProtocolMessage.Type.REVOKE) {
+						ev.emit('messages.update', [
+							{
+								key: { ...waMsg.key, id: protocolKeyId },
+								update: {
+									message: null,
+									messageStubType: WAProto.WebMessageInfo.StubType.REVOKE,
+									key: waMsg.key
+								}
+							}
+						])
+					} else if (
+						protocolMsg.type === WAProto.Message.ProtocolMessage.Type.MESSAGE_EDIT &&
+						protocolMsg.editedMessage
+					) {
+						const tsMs = protocolMsg.timestampMs
+						const editedTs =
+							tsMs != null ? Math.floor(Number(tsMs) / 1000) : (evt.timestamp ?? waMsg.messageTimestamp)
+						ev.emit('messages.update', [
+							{
+								key: { ...waMsg.key, id: protocolKeyId },
+								update: {
+									message: { editedMessage: { message: protocolMsg.editedMessage } },
+									messageTimestamp: editedTs
+								}
+							}
+						])
+					}
+				}
 				return
 			}
 
