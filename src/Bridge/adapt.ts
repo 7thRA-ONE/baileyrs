@@ -379,6 +379,7 @@ const adaptMessage = (data: unknown, logger?: ILogger): CanonicalEvent | null =>
 	const participantAlt = isGroup && isBridgeJid(src.sender_alt) ? bridgeJidToString(src.sender_alt) : undefined
 	const remoteJidAlt = !isGroup && isBridgeJid(src.recipient_alt) ? bridgeJidToString(src.recipient_alt) : undefined
 
+	const editAttribute = asString(info.edit)
 	return {
 		type: 'message',
 		chatJid: chat,
@@ -391,6 +392,9 @@ const adaptMessage = (data: unknown, logger?: ILogger): CanonicalEvent | null =>
 		participantAlt,
 		remoteJidAlt,
 		isViewOnce: info.is_view_once === true ? true : undefined,
+		isOffline: asBoolOr(info.is_offline, false) ? true : undefined,
+		unavailableRequestId: asString(info.unavailable_request_id),
+		editAttribute: editAttribute && editAttribute !== '' ? editAttribute : undefined,
 		messageProto: messageProto as never
 	}
 }

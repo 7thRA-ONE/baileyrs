@@ -61,6 +61,11 @@ const canonicalMessageToWAMessage = (m: CanonicalMessage): WAMessage => {
 	if (m.participantAlt) wm.key.participantAlt = m.participantAlt
 	if (m.remoteJidAlt) wm.key.remoteJidAlt = m.remoteJidAlt
 	if (m.isViewOnce) wm.key.isViewOnce = true
+	// Surface the raw EditAttribute so consumers that dedupe by `key.id`
+	// can branch on edits ("1") vs originals (""). Mirrors upstream's
+	// `decodeMessageNode` which sets `key.editAttribute` from the same
+	// stanza attribute.
+	if (m.editAttribute) (wm.key as { editAttribute?: string }).editAttribute = m.editAttribute
 	return wm
 }
 
@@ -163,7 +168,16 @@ export const makeEventHandler = (
 				// `sendMessage()` succeeds, not to drop inbound `fromMe`
 				// messages from other linked devices.
 				const waMsg = canonicalMessageToWAMessage(evt)
-				ev.emit('messages.upsert', { messages: [waMsg], type: 'notify' } as BaileysEventMap['messages.upsert'])
+				// Mirror upstream `messages-recv.ts:1491`: offline catch-up
+				// becomes 'append' so consumers can suppress live notifications
+				// for backfill. `requestId` flows when the bridge served this
+				// message via PDO recovery.
+				const upsertPayload: BaileysEventMap['messages.upsert'] = {
+					messages: [waMsg],
+					type: evt.isOffline ? 'append' : 'notify'
+				}
+				if (evt.unavailableRequestId) upsertPayload.requestId = evt.unavailableRequestId
+				ev.emit('messages.upsert', upsertPayload)
 
 				// Mirror upstream `process-message.ts:523-533`: when the inbound
 				// proto carries a `reactionMessage`, surface it on the dedicated

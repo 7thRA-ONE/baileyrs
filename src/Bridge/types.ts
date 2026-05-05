@@ -97,6 +97,25 @@ export interface CanonicalMessage {
 	remoteJidAlt?: string
 	/** True when the underlying payload is a view-once message (wrapper or inline flag). */
 	isViewOnce?: boolean
+	/**
+	 * `true` when delivered via offline catch-up. Drives the `messages.upsert`
+	 * type slot ('append' vs 'notify') so consumers can branch on
+	 * "live" vs "history replay".
+	 */
+	isOffline?: boolean
+	/**
+	 * PDO request id this message answers. Set when the bridge recovered
+	 * the message via `requestPlaceholderResend` instead of normal decrypt.
+	 * Surfaced on `messages.upsert.requestId` for upstream parity.
+	 */
+	unavailableRequestId?: string
+	/**
+	 * Bridge `EditAttribute` (raw stanza string: "1" sender-edit,
+	 * "2" sender-revoke, "3" admin-revoke, "7" pin, "8" unpin, "" none).
+	 * Used to set `key.editAttribute` on the wrapped WAMessage so consumers
+	 * can dedupe edits against the original message id.
+	 */
+	editAttribute?: string
 	messageProto: WAProto.IMessage
 }
 
