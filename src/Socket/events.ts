@@ -27,7 +27,7 @@ import type { BaileysEventMap, BinaryNode, ConnectionState, WACallEvent, WACallU
 import { DisconnectReason, WAProto } from '../Types/index.ts'
 import { Boom } from '../Utils/boom.ts'
 import { isJidGroup } from '../WABinary/jid-utils.ts'
-import { buildGroupNotificationDomainEvent, buildGroupNotificationStubMessages } from './group-notifications.ts'
+import { buildGroupJoinRequestEvents, buildGroupNotificationDomainEvent, buildGroupNotificationStubMessages } from './group-notifications.ts'
 import { mapReachoutTimelock } from './reachout.ts'
 import type { SocketContext } from './types.ts'
 
@@ -400,6 +400,13 @@ const DISPATCHERS: DispatcherMap = {
 
 		const domainEvent = buildGroupNotificationDomainEvent(evt)
 		if (domainEvent) ctx.ev.emit(domainEvent.name, domainEvent.payload as never)
+
+		// Fan out `group.join-request` for membership_approval_request /
+		// created_membership_requests / revoked_membership_requests.
+		// Upstream emits one event per affected participant.
+		for (const joinReq of buildGroupJoinRequestEvents(evt)) {
+			ctx.ev.emit('group.join-request', joinReq)
+		}
 
 		const stubMessages = buildGroupNotificationStubMessages(evt, fromMe)
 		if (stubMessages.length > 0) {

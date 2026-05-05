@@ -659,9 +659,33 @@ const adaptGroupAction = (raw: unknown): CanonicalGroupAction | null => {
 				unlinkReason: asString(raw.unlink_reason)
 			}
 		case 'membership_approval_request':
+			return {
+				type: 'membershipApprovalRequest',
+				requestMethod: asString(raw.request_method),
+				parentGroupJid: asJidString(raw.parent_group_jid)
+			}
 		case 'created_membership_requests':
+			return {
+				type: 'createdMembershipRequests',
+				requestMethod: asString(raw.request_method),
+				parentGroupJid: asJidString(raw.parent_group_jid),
+				requests: adaptGroupParticipants(raw.requests)
+			}
 		case 'revoked_membership_requests':
-			return { type: 'unknown', rawType: norm }
+			return {
+				type: 'revokedMembershipRequests',
+				// `revoked_membership_requests` ships bare Jids (not full
+				// participant infos), so wrap each into the canonical
+				// participant shape with no `phoneNumber`.
+				participants: Array.isArray(raw.participants)
+					? raw.participants
+							.map(j => {
+								const jid = asJidString(j)
+								return jid ? { jid } : null
+							})
+							.filter((p): p is CanonicalGroupParticipant => p !== null)
+					: []
+			}
 		default:
 			return { type: 'unknown', rawType }
 	}

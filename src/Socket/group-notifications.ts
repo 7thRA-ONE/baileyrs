@@ -45,6 +45,66 @@ export type GroupNotificationDomainEvent =
 	| { name: 'groups.update'; payload: BaileysEventMap['groups.update'] }
 	| null
 
+/**
+ * Build all `group.join-request` events a notification fans out to —
+ * upstream emits one event per affected participant. Returns an empty
+ * array for non-join-request actions.
+ */
+export const buildGroupJoinRequestEvents = (
+	notification: CanonicalGroupUpdate
+): BaileysEventMap['group.join-request'][] => {
+	const action = notification.action
+	const author = notification.author ?? ''
+	const authorPn = notification.authorPn
+
+	if (action.type === 'membershipApprovalRequest') {
+		// Single user requesting join. Upstream emits with action='created'
+		// and the participant being the requester (which IS the `author` of
+		// the notification).
+		return [
+			{
+				id: notification.groupJid,
+				author,
+				authorPn,
+				participant: author,
+				participantPn: authorPn,
+				action: 'created',
+				method: action.requestMethod as BaileysEventMap['group.join-request']['method']
+			}
+		]
+	}
+
+	if (action.type === 'createdMembershipRequests') {
+		// Batched fanout (typically community parent → linked group). Emit
+		// one event per request entry.
+		return action.requests.map(req => ({
+			id: notification.groupJid,
+			author,
+			authorPn,
+			participant: req.jid,
+			participantPn: req.phoneNumber,
+			action: 'created',
+			method: action.requestMethod as BaileysEventMap['group.join-request']['method']
+		}))
+	}
+
+	if (action.type === 'revokedMembershipRequests') {
+		// Admin revoked one or more pending requests. Method is unknown at
+		// this point (server doesn't echo the original method back).
+		return action.participants.map(p => ({
+			id: notification.groupJid,
+			author,
+			authorPn,
+			participant: p.jid,
+			participantPn: p.phoneNumber,
+			action: 'revoked',
+			method: undefined
+		}))
+	}
+
+	return []
+}
+
 /** Build the upstream-style high-level event for a canonical group update. */
 export const buildGroupNotificationDomainEvent = (notification: CanonicalGroupUpdate): GroupNotificationDomainEvent => {
 	const action = notification.action

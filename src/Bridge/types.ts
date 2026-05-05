@@ -237,6 +237,29 @@ export type CanonicalGroupAction =
 	| { type: 'delete'; reason?: string }
 	| { type: 'link'; linkType: string }
 	| { type: 'unlink'; unlinkType: string; unlinkReason?: string }
+	/**
+	 * Single join-request created by a user. `requestMethod` carries
+	 * `invite_link` / `linked_group_join` / `non_admin_add`.
+	 * `parentGroupJid` is set when the request fanned out from a parent
+	 * community.
+	 */
+	| {
+			type: 'membershipApprovalRequest'
+			requestMethod?: string
+			parentGroupJid?: string
+	  }
+	/** Batched join-requests (typically from a community linked-group fanout). */
+	| {
+			type: 'createdMembershipRequests'
+			requestMethod?: string
+			parentGroupJid?: string
+			requests: CanonicalGroupParticipant[]
+	  }
+	/** Admin revoked one or more pending requests. */
+	| {
+			type: 'revokedMembershipRequests'
+			participants: CanonicalGroupParticipant[]
+	  }
 	/** Catch-all for action types the adapter doesn't recognize yet. */
 	| { type: 'unknown'; rawType: string }
 

@@ -194,8 +194,13 @@ describe('adaptBridgeEvent — anti-corruption layer', () => {
 			expect(result.action.type).toBe('revokeInvite')
 		})
 
-		it('new variants from PR #567 surface as `unknown` with the wire-tag preserved', () => {
-			for (const tag of ['membership_approval_request', 'created_membership_requests', 'revoked_membership_requests']) {
+		it('PR #567 join-request variants narrow to canonical membership* / revoked* shapes', () => {
+			const expected = {
+				membership_approval_request: 'membershipApprovalRequest',
+				created_membership_requests: 'createdMembershipRequests',
+				revoked_membership_requests: 'revokedMembershipRequests'
+			} as const
+			for (const [tag, canonical] of Object.entries(expected)) {
 				const result = adaptBridgeEvent({
 					type: 'group_update',
 					data: {
@@ -205,8 +210,8 @@ describe('adaptBridgeEvent — anti-corruption layer', () => {
 						action: { type: tag }
 					}
 				} as unknown as WhatsAppEvent)
-				if (result?.type !== 'groupUpdate' || result.action.type !== 'unknown') throw new Error('narrowing')
-				expect(result.action.rawType).toBe(tag)
+				if (result?.type !== 'groupUpdate') throw new Error('narrowing')
+				expect(result.action.type).toBe(canonical)
 			}
 		})
 	})
