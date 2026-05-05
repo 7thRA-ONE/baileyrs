@@ -401,6 +401,16 @@ const DISPATCHERS: DispatcherMap = {
 		const domainEvent = buildGroupNotificationDomainEvent(evt)
 		if (domainEvent) ctx.ev.emit(domainEvent.name, domainEvent.payload as never)
 
+		// `groups.upsert` for group creation. Upstream emits it from
+		// `messages-recv.ts:661` after fetching metadata; here we have only
+		// the `<create>` notification (no metadata payload), so consumers
+		// that need full info should refetch via `groupMetadata`. Emitting
+		// the bare id matches what upstream sends when the metadata fetch
+		// hasn't completed yet — better than silently swallowing the event.
+		if (evt.action.type === 'create') {
+			ctx.ev.emit('groups.upsert', [{ id: evt.groupJid } as never])
+		}
+
 		// Fan out `group.join-request` for membership_approval_request /
 		// created_membership_requests / revoked_membership_requests.
 		// Upstream emits one event per affected participant.
@@ -567,6 +577,14 @@ const DISPATCHERS: DispatcherMap = {
 			lidPnMappings: evt.lidPnMappings.length > 0 ? evt.lidPnMappings : undefined
 		}
 		ctx.ev.emit('messaging-history.set', payload)
+
+		// Also fan out to `chats.upsert` / `contacts.upsert` so bots that
+		// wire those (instead of, or in addition to, messaging-history.set)
+		// get hydrated. Upstream emits both channels from different code
+		// paths; we collapse them here so consumers picking either pattern
+		// see the same data on the first pair.
+		if (evt.chats.length > 0) ctx.ev.emit('chats.upsert', evt.chats)
+		if (evt.contacts.length > 0) ctx.ev.emit('contacts.upsert', evt.contacts)
 	}
 }
 
