@@ -366,6 +366,31 @@ export interface CanonicalLidMappingUpdate {
 	mappings: { lid: string; pn: string }[]
 }
 
+/** A chat was deleted from the user's app-state index. */
+export interface CanonicalChatDelete {
+	type: 'chatDelete'
+	jid: string
+}
+
+/** "Delete for me" of a single message via app-state sync. */
+export interface CanonicalMessageDelete {
+	type: 'messageDelete'
+	chatJid: string
+	messageId: string
+	fromMe: boolean
+	participantJid?: string
+}
+
+/** Per-chat ephemeral (disappearing) mode change. */
+export interface CanonicalDisappearingModeChanged {
+	type: 'disappearingModeChanged'
+	jid: string
+	/** Duration in seconds. 0 = disabled. */
+	duration: number
+	/** Unix-seconds the user changed the setting at. */
+	settingTimestamp?: number
+}
+
 export interface CanonicalHistorySync {
 	type: 'historySync'
 	chats: Chat[]
@@ -457,6 +482,9 @@ export type CanonicalEvent =
 	| CanonicalIncomingCall
 	| CanonicalUndecryptableMessage
 	| CanonicalLidMappingUpdate
+	| CanonicalChatDelete
+	| CanonicalMessageDelete
+	| CanonicalDisappearingModeChanged
 	| CanonicalHistorySync
 	| CanonicalRawNode
 	| CanonicalNotification

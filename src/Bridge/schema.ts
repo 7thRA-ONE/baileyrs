@@ -240,7 +240,17 @@ const ADAPTERS = {
 	offline_sync_completed: () => ({ type: 'noop', bridgeType: 'offline_sync_completed' }),
 	offline_sync_preview: () => ({ type: 'noop', bridgeType: 'offline_sync_preview' }),
 	device_list_update: () => ({ type: 'noop', bridgeType: 'device_list_update' }),
-	disappearing_mode_changed: () => ({ type: 'noop', bridgeType: 'disappearing_mode_changed' }),
+	disappearing_mode_changed: data => {
+		const jid = asJidString(data.from)
+		const duration = asNumber(data.duration)
+		if (!jid || duration == null) return { type: 'noop', bridgeType: 'disappearing_mode_changed' }
+		return {
+			type: 'disappearingModeChanged',
+			jid,
+			duration,
+			settingTimestamp: asNumber(data.setting_timestamp)
+		}
+	},
 	business_status_update: () => ({ type: 'noop', bridgeType: 'business_status_update' }),
 	newsletter_live_update: () => ({ type: 'noop', bridgeType: 'newsletter_live_update' }),
 	contact_number_changed: data => {
@@ -260,8 +270,22 @@ const ADAPTERS = {
 	},
 	contact_sync_requested: () => ({ type: 'noop', bridgeType: 'contact_sync_requested' }),
 	user_about_update: () => ({ type: 'noop', bridgeType: 'user_about_update' }),
-	delete_chat_update: () => ({ type: 'noop', bridgeType: 'delete_chat_update' }),
-	delete_message_for_me_update: () => ({ type: 'noop', bridgeType: 'delete_message_for_me_update' }),
+	delete_chat_update: data => {
+		const jid = asJidString(data.jid)
+		return jid ? { type: 'chatDelete', jid } : { type: 'noop', bridgeType: 'delete_chat_update' }
+	},
+	delete_message_for_me_update: data => {
+		const chatJid = asJidString(data.chat_jid)
+		const messageId = asString(data.message_id)
+		if (!chatJid || !messageId) return { type: 'noop', bridgeType: 'delete_message_for_me_update' }
+		return {
+			type: 'messageDelete',
+			chatJid,
+			messageId,
+			fromMe: asBoolOr(data.from_me, false),
+			participantJid: asJidString(data.participant_jid)
+		}
+	},
 
 	// ── Generic notification / raw node ──
 	notification: data => {

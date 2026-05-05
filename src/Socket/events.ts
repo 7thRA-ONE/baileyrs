@@ -450,6 +450,33 @@ const DISPATCHERS: DispatcherMap = {
 			ctx.ev.emit('lid-mapping.update', mapping)
 		}
 	},
+	chatDelete: (evt, { ctx }) => ctx.ev.emit('chats.delete', [evt.jid]),
+	messageDelete: (evt, { ctx }) =>
+		// Upstream `chat-utils.ts:857` shape: `{ keys: WAMessageKey[] }` for
+		// per-message delete (not the `{ jid, all: true }` chat-clear case
+		// — that's a different sync action surface).
+		ctx.ev.emit('messages.delete', {
+			keys: [
+				{
+					remoteJid: evt.chatJid,
+					id: evt.messageId,
+					fromMe: evt.fromMe,
+					...(evt.participantJid ? { participant: evt.participantJid } : {})
+				}
+			]
+		}),
+	disappearingModeChanged: (evt, { ctx }) =>
+		// Upstream surfaces this through `chats.update.ephemeralExpiration`
+		// (set in `process-message.ts:417` for the protocolMessage path).
+		// Bridge gives us the same data via a dedicated event — emit on
+		// the same channel for parity.
+		ctx.ev.emit('chats.update', [
+			{
+				id: evt.jid,
+				ephemeralExpiration: evt.duration > 0 ? evt.duration : null,
+				ephemeralSettingTimestamp: evt.settingTimestamp
+			}
+		]),
 
 
 	historySync: (evt, { ctx }) => {
